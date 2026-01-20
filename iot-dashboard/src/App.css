@@ -15,23 +15,54 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#root {
+  position: relative;
+  min-height: 100vh;
+}
+
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
   background:
     radial-gradient(1200px 600px at 20% 10%, rgba(96,165,250,0.25), transparent 60%),
     radial-gradient(900px 500px at 80% 30%, rgba(34,197,94,0.18), transparent 60%),
     radial-gradient(700px 450px at 60% 90%, rgba(168,85,247,0.16), transparent 55%),
     var(--bg);
-  color: var(--text);
+
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+
+  transform: translateZ(0);
 }
 
-a { color: inherit; }
+.container {
+  position: relative;
+  z-index: 1;
+}
 
+/* Full-window responsive container */
 .container{
-  max-width: 1200px;
+  width: 100%;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 28px 18px 60px;
+  padding: 28px 24px 60px;
+  min-height: 100vh;
 }
 
 .header{
@@ -124,6 +155,7 @@ a { color: inherit; }
   display:flex;
   gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .btn{
@@ -139,6 +171,23 @@ a { color: inherit; }
 }
 .btn:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.09); }
 .btn:disabled{ opacity: 0.55; cursor: not-allowed; transform: none; }
+
+/* Dropdown styling for timeframe */
+.select{
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  outline: none;
+  cursor: pointer;
+}
+.select option{
+  background: #0b1220;
+  color: var(--text);
+}
 
 .gridStats{
   display:grid;
@@ -175,9 +224,21 @@ a { color: inherit; }
 @media (max-width: 900px){
   .stat{ grid-column: span 6; }
 }
+
 @media (max-width: 560px){
   .title{ font-size: 24px; }
   .stat{ grid-column: span 12; }
+  .container{ padding: 18px 14px 40px; }
+}
+
+/* Chart container */
+.chartBox{
+  height: 280px;
+  width: 100%;
+}
+
+@media (max-width: 560px){
+  .chartBox{ height: 220px; }
 }
 
 .relayRow{
@@ -185,9 +246,11 @@ a { color: inherit; }
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
+
 @media (max-width: 900px){
   .relayRow{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
 @media (max-width: 560px){
   .relayRow{ grid-template-columns: 1fr; }
 }
@@ -242,4 +305,24 @@ a { color: inherit; }
   margin-top: 10px;
   font-size: 12px;
   color: var(--muted2);
+}
+
+body {
+  display: block;          /* overrides template: display:flex */
+}
+
+#root {
+  width: 100%;
+  max-width: none;         /* overrides template max-width */
+  margin: 0;               /* overrides margin:auto */
+  padding: 0;              /* overrides root padding */
+}
+
+/* Make the page use the full window width */
+.container{
+  width: 100%;
+  max-width: none;         /* remove the 1400px cap */
+  margin: 0;               /* no centering gap */
+  padding: 28px clamp(14px, 2.2vw, 48px) 60px;
+  min-height: 100vh;
 }
