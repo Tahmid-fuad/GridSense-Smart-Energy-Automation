@@ -326,3 +326,192 @@ body {
   padding: 28px clamp(14px, 2.2vw, 48px) 60px;
   min-height: 100vh;
 }
+
+/* --- Layout upgrades --- */
+.loadStatsGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+  margin-top:14px;
+}
+@media (max-width: 900px){
+  .loadStatsGrid{ grid-template-columns: 1fr; }
+}
+.miniCard{
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  border-radius: 14px;
+  padding: 12px;
+}
+.miniCardTitle{
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.miniRow{
+  display:grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap:10px;
+}
+@media (max-width: 900px){
+  .miniRow{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.kv{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.kv span{ opacity:0.75; font-size: 12px; }
+.kv b{ font-size: 16px; }
+
+/* --- Chart grid --- */
+.chartGrid{
+  display:grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap:12px;
+  margin-top: 12px;
+}
+@media (max-width: 1100px){
+  .chartGrid{ grid-template-columns: 1fr; }
+}
+.chartCard{
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  border-radius: 14px;
+  padding: 12px;
+}
+.chartTitle{
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.chartBox{
+  width: 100%;
+  height: 280px;
+  border-radius: 12px;
+  border: 1px dashed rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.15);
+  padding: 8px;
+}
+
+/* --- Tabs --- */
+.tabs{
+  display:flex;
+  gap:8px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.03);
+  border-radius: 999px;
+}
+.tabBtn{
+  border: 0;
+  background: transparent;
+  color: rgba(255,255,255,0.85);
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.tabBtn.active{
+  background: rgba(255,255,255,0.10);
+}
+
+/* --- Relay cards --- */
+.loadGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+  margin-top: 10px;
+}
+@media (max-width: 900px){
+  .loadGrid{ grid-template-columns: 1fr; }
+}
+.loadCard{
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 12px;
+}
+.loadHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom: 10px;
+}
+.loadTitle{
+  font-weight: 900;
+  font-size: 18px;
+}
+.toggleBtn{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  padding: 10px 12px;
+  border-radius: 999px;
+  cursor:pointer;
+  font-weight: 900;
+}
+.toggleBtn.on{
+  border-color: rgba(52,211,153,0.45);
+  background: rgba(52,211,153,0.12);
+}
+.toggleDot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.35);
+}
+.toggleBtn.on .toggleDot{
+  background: rgba(52,211,153,1);
+}
+.toggleText{ letter-spacing: 0.3px; }
+
+/* --- Mini sections --- */
+.miniSection{
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.miniTitle{
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap: wrap;
+}
+.input{
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.20);
+  color: rgba(255,255,255,0.92);
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+.check{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  user-select:none;
+}
+.chip{
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.chip.muted{
+  opacity: 0.75;
+}
+.btn.ghost{
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.14);
+}
