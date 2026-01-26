@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { API_BASE, DEVICE_ID } from "./config";
 import "./App.css";
@@ -42,6 +42,26 @@ function clampNum(x, digits = 2) {
   return x.toFixed(digits);
 }
 
+function normalizeSchedule(s) {
+  return {
+    enabled: !!s?.enabled,
+    invert: !!s?.invert,
+    on: s?.on || "00:00",
+    off: s?.off || "00:00",
+  };
+}
+
+function schedulesEqual(a, b) {
+  const A = normalizeSchedule(a);
+  const B = normalizeSchedule(b);
+  return (
+    A.enabled === B.enabled &&
+    A.invert === B.invert &&
+    A.on === B.on &&
+    A.off === B.off
+  );
+}
+
 function RelayCardBackend({
   ch,
   label,
@@ -50,22 +70,34 @@ function RelayCardBackend({
   onToggle,
 
   // timer
-  timerMin,
-  setTimerMin,
+  timerVal,
+  setTimerVal,
   onStartTimer,
   timerRemainingSec,
   onCancelTimer,
+  timerMode,
 
   // schedule
   schedule,
   setSchedule,
   onApplySchedule,
+  onScheduleFocus,
+  scheduleServer,
+  scheduleSavedAt,
+  onCancelSchedule,
 
   // cutoff
   cutoff,
   setCutoff,
   onApplyCutoff,
 }) {
+  const enabled = !!schedule?.enabled;
+  const saved = scheduleServer
+    ? schedulesEqual(schedule, scheduleServer)
+    : true;
+  const onLabel = schedule?.invert ? "OFF" : "ON";
+  const offLabel = schedule?.invert ? "ON" : "OFF";
+
   return (
     <div className="loadCard">
       <div className="loadHeader">
@@ -90,55 +122,158 @@ function RelayCardBackend({
 
       {/* Timer */}
       <div className="miniSection">
-        <div className="miniTitle">Timed switching (backend)</div>
-        <div className="row">
-          <input
-            className="input"
-            style={{ width: 120 }}
-            type="number"
-            min={1}
-            max={720}
-            value={timerMin}
-            onChange={(e) =>
-              setTimerMin(Math.max(1, Math.min(720, Number(e.target.value))))
-            }
-            disabled={disabled}
-          />
-          <div className="small">minutes</div>
+        <div className="miniTitle">Timed switching</div>
 
+        {/* ON FOR row */}
+        <div className="row">
           <button
             className="btn"
             type="button"
-            onClick={() => onStartTimer(ch)}
+            onClick={() => onStartTimer(ch, "on_for")}
             disabled={disabled}
-            title="Turns relay ON now and auto-OFF after X minutes (backend)"
+            title="Turn ON now, then OFF after the duration"
           >
             Turn ON for
           </button>
 
-          {timerRemainingSec > 0 ? (
-            <>
-              <div className="chip">
-                Auto-OFF in <b>{timerRemainingSec}s</b>
-              </div>
-              <button
-                className="btn ghost"
-                type="button"
-                onClick={() => onCancelTimer(ch)}
-                disabled={disabled}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <div className="chip muted">No active timer</div>
+          <input
+            className="input"
+            style={{ width: 90 }}
+            type="number"
+            min={0}
+            max={720}
+            value={timerVal?.onFor?.min ?? 0}
+            onChange={(e) =>
+              setTimerVal((s) => ({
+                ...(s || {
+                  onFor: { min: 0, sec: 0 },
+                  offFor: { min: 0, sec: 0 },
+                }),
+                onFor: {
+                  ...((s && s.onFor) || { min: 0, sec: 0 }),
+                  min: Math.max(0, Math.min(720, Number(e.target.value))),
+                },
+              }))
+            }
+            disabled={disabled}
+          />
+          <div className="small">min</div>
+
+          <input
+            className="input"
+            style={{ width: 90 }}
+            type="number"
+            min={0}
+            max={59}
+            value={timerVal?.onFor?.sec ?? 0}
+            onChange={(e) =>
+              setTimerVal((s) => ({
+                ...(s || {
+                  onFor: { min: 0, sec: 0 },
+                  offFor: { min: 0, sec: 0 },
+                }),
+                onFor: {
+                  ...((s && s.onFor) || { min: 0, sec: 0 }),
+                  sec: Math.max(0, Math.min(59, Number(e.target.value))),
+                },
+              }))
+            }
+            disabled={disabled}
+          />
+          <div className="small">sec</div>
+        </div>
+
+        {/* OFF FOR row */}
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => onStartTimer(ch, "off_for")}
+            disabled={disabled}
+            title="Turn OFF now, then ON after the duration"
+          >
+            Turn OFF for
+          </button>
+
+          <input
+            className="input"
+            style={{ width: 90 }}
+            type="number"
+            min={0}
+            max={720}
+            value={timerVal?.offFor?.min ?? 0}
+            onChange={(e) =>
+              setTimerVal((s) => ({
+                ...(s || {
+                  onFor: { min: 0, sec: 0 },
+                  offFor: { min: 0, sec: 0 },
+                }),
+                offFor: {
+                  ...((s && s.offFor) || { min: 0, sec: 0 }),
+                  min: Math.max(0, Math.min(720, Number(e.target.value))),
+                },
+              }))
+            }
+            disabled={disabled}
+          />
+          <div className="small">min</div>
+
+          <input
+            className="input"
+            style={{ width: 90 }}
+            type="number"
+            min={0}
+            max={59}
+            value={timerVal?.offFor?.sec ?? 0}
+            onChange={(e) =>
+              setTimerVal((s) => ({
+                ...(s || {
+                  onFor: { min: 0, sec: 0 },
+                  offFor: { min: 0, sec: 0 },
+                }),
+                offFor: {
+                  ...((s && s.offFor) || { min: 0, sec: 0 }),
+                  sec: Math.max(0, Math.min(59, Number(e.target.value))),
+                },
+              }))
+            }
+            disabled={disabled}
+          />
+          <div className="small">sec</div>
+        </div>
+        <div className="timerStatusWrap">
+          <div className={`chip ${timerRemainingSec > 0 ? "" : "muted"}`}>
+            {timerRemainingSec > 0 ? (
+              timerMode ? (
+                <>
+                  Running: <b>{timerMode}</b> • <b>{timerRemainingSec}s</b>
+                </>
+              ) : (
+                <>
+                  Timer: <b>{timerRemainingSec}s</b>
+                </>
+              )
+            ) : (
+              <>No active timer</>
+            )}
+          </div>
+
+          {timerRemainingSec > 0 && (
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={() => onCancelTimer(ch)}
+              disabled={disabled}
+            >
+              Cancel
+            </button>
           )}
         </div>
       </div>
 
       {/* Schedule */}
       <div className="miniSection">
-        <div className="miniTitle">Daily schedule (backend)</div>
+        <div className="miniTitle">Daily schedule </div>
         <div className="row">
           <label className="check">
             <input
@@ -152,22 +287,34 @@ function RelayCardBackend({
             Enable
           </label>
 
-          <div className="small">ON</div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={!!schedule.invert}
+              onChange={(e) =>
+                setSchedule((s) => ({ ...s, invert: e.target.checked }))
+              }
+              disabled={disabled || !schedule.enabled}
+            />
+            Reverse
+          </label>
+
+          <div className="small">{onLabel}</div>
           <input
             className="input"
             type="time"
             value={schedule.on}
-            onChange={(e) =>
-              setSchedule((s) => ({ ...s, on: e.target.value }))
-            }
+            onFocus={() => onScheduleFocus(ch)}
+            onChange={(e) => setSchedule((s) => ({ ...s, on: e.target.value }))}
             disabled={disabled || !schedule.enabled}
           />
 
-          <div className="small">OFF</div>
+          <div className="small">{offLabel}</div>
           <input
             className="input"
             type="time"
             value={schedule.off}
+            onFocus={() => onScheduleFocus(ch)}
             onChange={(e) =>
               setSchedule((s) => ({ ...s, off: e.target.value }))
             }
@@ -184,15 +331,55 @@ function RelayCardBackend({
             Apply
           </button>
 
-          <div className="chip muted">
-            Window: {schedule.on} → {schedule.off}
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => onCancelSchedule(ch)}
+            disabled={disabled}
+            title="Delete schedule from backend"
+          >
+            Cancel
+          </button>
+
+          <div className="scheduleStatusRow">
+            <div className={`chip ${enabled ? "" : "muted"}`}>
+              {enabled ? (
+                <>
+                  Schedule: <b>{schedule.on}</b> → <b>{schedule.off}</b>
+                  {schedule.invert ? (
+                    <span className="small"> • Reverse</span>
+                  ) : null}
+                </>
+              ) : (
+                <>Schedule disabled</>
+              )}
+            </div>
+
+            <div className={`chip ${saved ? "" : "warn"}`}>
+              {saved ? (
+                <>
+                  Saved
+                  {scheduleSavedAt ? (
+                    <span className="small">
+                      {" "}
+                      •{" "}
+                      {new Date(scheduleSavedAt).toLocaleTimeString([], {
+                        hour12: false,
+                      })}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <>Unsaved changes</>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Cutoff */}
-      <div className="miniSection">
-        <div className="miniTitle">Power-based auto cutoff (backend)</div>
+      {/* <div className="miniSection">
+        <div className="miniTitle">Power-based auto cutoff </div>
         <div className="row">
           <label className="check">
             <input
@@ -250,7 +437,7 @@ function RelayCardBackend({
             Apply
           </button>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 }
@@ -262,6 +449,7 @@ export default function App() {
 
   const [loadingRelay, setLoadingRelay] = useState(false);
   const [error, setError] = useState("");
+  const [scheduleSavedAt, setScheduleSavedAt] = useState({ 1: null, 3: null });
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
@@ -276,17 +464,30 @@ export default function App() {
 
   // automations state from backend
   const [timers, setTimers] = useState({ 1: null, 3: null }); // {endAt,...} or null
-  const [schedules, setSchedules] = useState({
-    1: { enabled: false, on: "18:00", off: "23:00" },
-    3: { enabled: false, on: "18:00", off: "23:00" },
+  const [schedulesServer, setSchedulesServer] = useState({
+    1: { enabled: false, on: "18:00", off: "23:00", invert: false },
+    3: { enabled: false, on: "18:00", off: "23:00", invert: false },
   });
+
+  const [schedulesDraft, setSchedulesDraft] = useState({
+    1: { enabled: false, on: "18:00", off: "23:00", invert: false },
+    3: { enabled: false, on: "18:00", off: "23:00", invert: false },
+  });
+
+  // editing lock per channel (so only that card stops overwriting)
+  const [editingScheduleCh, setEditingScheduleCh] = useState(null);
+  const editingScheduleChRef = useRef(null);
+
   const [cutoffs, setCutoffs] = useState({
     1: { enabled: false, thresholdW: 150, holdSec: 10 },
     3: { enabled: false, thresholdW: 150, holdSec: 10 },
   });
 
   // timer minutes input (UI-only)
-  const [timerMinByCh, setTimerMinByCh] = useState({ 1: 10, 3: 10 });
+  const [timerByCh, setTimerByCh] = useState({
+    1: { onFor: { min: 10, sec: 0 }, offFor: { min: 10, sec: 0 } },
+    3: { onFor: { min: 10, sec: 0 }, offFor: { min: 10, sec: 0 } },
+  });
 
   // countdown tick
   const [tick, setTick] = useState(0);
@@ -325,7 +526,7 @@ export default function App() {
   async function fetchHistory() {
     try {
       const res = await axios.get(
-        `${API_BASE}/api/history/${DEVICE_ID}?limit=2000`
+        `${API_BASE}/api/history/${DEVICE_ID}?limit=2000`,
       );
       setHistory(Array.isArray(res.data) ? res.data : []);
     } catch {
@@ -338,7 +539,28 @@ export default function App() {
       const res = await axios.get(`${API_BASE}/api/automations/${DEVICE_ID}`);
       const d = res.data || {};
       if (d.timers) setTimers(d.timers);
-      if (d.schedules) setSchedules(d.schedules);
+      if (d.schedules) {
+        setSchedulesServer(d.schedules);
+
+        const editingCh = editingScheduleChRef.current;
+
+        // Only overwrite drafts if user is NOT editing.
+        if (!editingCh) {
+          setSchedulesDraft(d.schedules);
+        } else {
+          setSchedulesDraft((prev) => {
+            const next = { ...prev };
+
+            for (const ch of [1, 3]) {
+              if (ch !== editingCh) {
+                next[ch] = d.schedules[ch] || next[ch];
+              }
+            }
+
+            return next;
+          });
+        }
+      }
       if (d.cutoffs) setCutoffs(d.cutoffs);
     } catch {
       // if endpoint missing or down, show a single clean message
@@ -351,28 +573,49 @@ export default function App() {
       setLoadingRelay(true);
       setError("");
       await axios.post(`${API_BASE}/api/relay/${DEVICE_ID}`, { ch, state });
-      setTimeout(fetchLatest, 350);
+      setTimeout(() => {
+        fetchLatest();
+        fetchAutomations();
+      }, 350);
     } catch {
-      setError("Relay command failed. Check backend logs and MQTT connectivity.");
+      setError(
+        "Relay command failed. Check backend logs and MQTT connectivity.",
+      );
     } finally {
       setLoadingRelay(false);
     }
   }
 
-  async function startTimerOnFor(ch) {
+  async function masterOff() {
     try {
       setLoadingRelay(true);
       setError("");
-      const minutes = timerMinByCh[ch] || 10;
-      const res = await axios.post(`${API_BASE}/api/timer/${DEVICE_ID}`, {
-        ch,
-        minutes,
-      });
-      // refresh backend state (timer endAt is authoritative)
-      await fetchAutomations();
-      // small refresh of telemetry too
+      await axios.post(`${API_BASE}/api/relayAll/${DEVICE_ID}`, { state: 0 });
       setTimeout(fetchLatest, 350);
-      return res.data;
+    } catch {
+      setError("Master OFF failed. Check backend and MQTT connectivity.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
+  async function startTimer(ch, mode) {
+    try {
+      setLoadingRelay(true);
+      setError("");
+
+      const cfg = timerByCh[ch] || {};
+      const t = mode === "on_for" ? cfg.onFor : cfg.offFor;
+
+      await axios.post(`${API_BASE}/api/timer/${DEVICE_ID}`, {
+        ch,
+        mode,
+        minutes: Number(t?.min || 0),
+        seconds: Number(t?.sec || 0),
+      });
+
+      await fetchAutomations();
+      setTimeout(fetchLatest, 350);
     } catch {
       setError("Timer request failed. Check backend logs.");
     } finally {
@@ -398,16 +641,66 @@ export default function App() {
     try {
       setLoadingRelay(true);
       setError("");
-      const s = schedules[ch];
+
+      const s = schedulesDraft[ch];
+
       await axios.post(`${API_BASE}/api/schedule/${DEVICE_ID}`, {
         ch,
         enabled: !!s.enabled,
         on: s.on,
         off: s.off,
+        invert: !!s.invert,
       });
+
+      setScheduleSavedAt((prev) => ({ ...prev, [ch]: Date.now() }));
+
+      setEditingScheduleCh(null);
       await fetchAutomations();
     } catch {
       setError("Schedule save failed. Check backend logs.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
+  function normalizeSchedule(s) {
+    return {
+      enabled: !!s?.enabled,
+      invert: !!s?.invert,
+      on: s?.on || "00:00",
+      off: s?.off || "00:00",
+    };
+  }
+
+  function schedulesEqual(a, b) {
+    const A = normalizeSchedule(a);
+    const B = normalizeSchedule(b);
+    return (
+      A.enabled === B.enabled &&
+      A.invert === B.invert &&
+      A.on === B.on &&
+      A.off === B.off
+    );
+  }
+
+  async function cancelSchedule(ch) {
+    try {
+      setLoadingRelay(true);
+      setError("");
+
+      await axios.delete(`${API_BASE}/api/schedule/${DEVICE_ID}/${ch}`);
+
+      // Refresh automations from backend
+      setEditingScheduleCh(null);
+      await fetchAutomations();
+
+      // Optional: also reset local draft UI immediately
+      setSchedulesDraft((prev) => ({
+        ...prev,
+        [ch]: { enabled: false, on: "18:00", off: "23:00", invert: false },
+      }));
+    } catch {
+      setError("Schedule cancel failed. Check backend logs.");
     } finally {
       setLoadingRelay(false);
     }
@@ -431,6 +724,10 @@ export default function App() {
       setLoadingRelay(false);
     }
   }
+
+  useEffect(() => {
+    editingScheduleChRef.current = editingScheduleCh;
+  }, [editingScheduleCh]);
 
   // initial + periodic fetch
   useEffect(() => {
@@ -467,6 +764,25 @@ export default function App() {
   const p3 = typeof latest?.p3 === "number" ? latest.p3 : null;
   const e3Wh = typeof latest?.e3Wh === "number" ? latest.e3Wh : null;
 
+  const totalVoltage = useMemo(() => {
+    if (typeof latest?.v1 === "number" && typeof latest?.v3 === "number") {
+      return (latest.v1 + latest.v3) / 2;
+    }
+    if (typeof latest?.voltage === "number") return latest.voltage;
+    return typeof latest?.v1 === "number"
+      ? latest.v1
+      : typeof latest?.v3 === "number"
+        ? latest.v3
+        : null;
+  }, [latest]);
+
+  const totalCurrent = useMemo(() => {
+    if (typeof latest?.i1 === "number" || typeof latest?.i3 === "number") {
+      return Number(latest?.i1 || 0) + Number(latest?.i3 || 0);
+    }
+    return typeof latest?.current === "number" ? latest.current : null;
+  }, [latest]);
+
   // totals
   const pT = typeof latest?.power === "number" ? latest.power : null;
   const eT = typeof latest?.energyWh === "number" ? latest.energyWh : null;
@@ -487,10 +803,9 @@ export default function App() {
   const series = useMemo(() => {
     const rows = (history || [])
       .map((row) => {
-        const t =
-          row?.createdAt
-            ? new Date(row.createdAt).getTime()
-            : row?.ts
+        const t = row?.createdAt
+          ? new Date(row.createdAt).getTime()
+          : row?.ts
             ? row.ts * 1000
             : null;
 
@@ -525,18 +840,18 @@ export default function App() {
     if (chartMode === "voltage") {
       return [
         { name: "Load-1", value: avg("v1") },
-        { name: "Load-3", value: avg("v3") },
+        { name: "Load-2", value: avg("v3") },
       ];
     }
     if (chartMode === "current") {
       return [
         { name: "Load-1", value: avg("i1") },
-        { name: "Load-3", value: avg("i3") },
+        { name: "Load-2", value: avg("i3") },
       ];
     }
     return [
       { name: "Load-1", value: avg("p1") },
-      { name: "Load-3", value: avg("p3") },
+      { name: "Load-2", value: avg("p3") },
     ];
   }, [series, chartMode]);
 
@@ -559,7 +874,7 @@ export default function App() {
 
     return [
       { name: "Load-1", value: Math.max(0, e1) },
-      { name: "Load-3", value: Math.max(0, e3) },
+      { name: "Load-2", value: Math.max(0, e3) },
     ];
   }, [series]);
 
@@ -567,17 +882,18 @@ export default function App() {
     chartMode === "voltage"
       ? ["v1", "v3"]
       : chartMode === "current"
-      ? ["i1", "i3"]
-      : ["p1", "p3"];
+        ? ["i1", "i3"]
+        : ["p1", "p3"];
 
   const yLabel =
     chartMode === "voltage"
       ? "Voltage (V)"
       : chartMode === "current"
-      ? "Current (A)"
-      : "Power (W)";
+        ? "Current (A)"
+        : "Power (W)";
 
-  const unit = chartMode === "voltage" ? "V" : chartMode === "current" ? "A" : "W";
+  const unit =
+    chartMode === "voltage" ? "V" : chartMode === "current" ? "A" : "W";
   const digits = chartMode === "voltage" ? 1 : chartMode === "current" ? 3 : 2;
 
   return (
@@ -599,6 +915,15 @@ export default function App() {
           </div>
           <button className="btn" onClick={fetchLatest} type="button">
             Refresh
+          </button>
+          <button
+            className="btn masterOff"
+            onClick={masterOff}
+            type="button"
+            disabled={disabled}
+            title="Turn OFF both relays"
+          >
+            KILL Switch
           </button>
         </div>
       </div>
@@ -627,44 +952,185 @@ export default function App() {
             </div>
           </div>
           <div className="actions">
-            <a className="btn" href={`${API_BASE}/api/health`} target="_blank" rel="noreferrer">
+            <a
+              className="btn"
+              href={`${API_BASE}/api/health`}
+              target="_blank"
+              rel="noreferrer"
+            >
               API Health
             </a>
-            <a className="btn" href={`${API_BASE}/api/latest/${DEVICE_ID}`} target="_blank" rel="noreferrer">
+            <a
+              className="btn"
+              href={`${API_BASE}/api/latest/${DEVICE_ID}`}
+              target="_blank"
+              rel="noreferrer"
+            >
               Latest JSON
             </a>
           </div>
         </div>
 
-        <div className="gridStats">
-          <Stat label="Total Power (W)" value={pT != null ? clampNum(pT, 2) : "—"} hint="device total" />
-          <Stat label="Total Energy (Wh)" value={eT != null ? clampNum(eT, 3) : "—"} hint="device total" />
-          <Stat label="Wi-Fi RSSI (dBm)" value={rssi != null ? rssi : "—"} hint="Signal strength" />
-          <Stat label="Relay State" value={JSON.stringify([relay1, relay3])} hint="[Relay-1, Relay-3]" />
-          <Stat label="Load-1 (W)" value={p1 != null ? clampNum(p1, 2) : "—"} hint="Relay-1 power" />
-          <Stat label="Load-3 (W)" value={p3 != null ? clampNum(p3, 2) : "—"} hint="Relay-3 power" />
+        <div className="overviewLine">
+          <Stat
+            label="Total Power"
+            value={pT != null ? `${clampNum(pT, 2)} W` : "—"}
+          />
+          <Stat
+            label="Total Energy"
+            value={eT != null ? `${clampNum(eT, 3)} Wh` : "—"}
+          />
+          <Stat
+            label="Total Voltage"
+            value={
+              totalVoltage != null ? `${clampNum(totalVoltage, 1)} V` : "—"
+            }
+          />
+          <Stat
+            label="Total Current"
+            value={
+              totalCurrent != null ? `${clampNum(totalCurrent, 3)} A` : "—"
+            }
+          />
+          <Stat label="RSSI" value={rssi != null ? `${rssi} dBm` : "—"} />
         </div>
 
         <div className="loadStatsGrid">
           <div className="miniCard">
             <div className="miniCardTitle">Load-1 (Relay-1)</div>
             <div className="miniRow">
-              <div className="kv"><span>Vrms</span><b>{v1 != null ? clampNum(v1, 1) : "—"} V</b></div>
-              <div className="kv"><span>Irms</span><b>{i1 != null ? clampNum(i1, 3) : "—"} A</b></div>
-              <div className="kv"><span>Power</span><b>{p1 != null ? clampNum(p1, 2) : "—"} W</b></div>
-              <div className="kv"><span>Energy</span><b>{e1Wh != null ? clampNum(e1Wh, 3) : "—"} Wh</b></div>
+              <div className="kv">
+                <span>Vrms</span>
+                <b>{v1 != null ? clampNum(v1, 1) : "—"} V</b>
+              </div>
+              <div className="kv">
+                <span>Irms</span>
+                <b>{i1 != null ? clampNum(i1, 3) : "—"} A</b>
+              </div>
+              <div className="kv">
+                <span>Power</span>
+                <b>{p1 != null ? clampNum(p1, 2) : "—"} W</b>
+              </div>
+              <div className="kv">
+                <span>Energy</span>
+                <b>{e1Wh != null ? clampNum(e1Wh, 3) : "—"} Wh</b>
+              </div>
             </div>
           </div>
 
           <div className="miniCard">
-            <div className="miniCardTitle">Load-3 (Relay-3)</div>
+            <div className="miniCardTitle">Load-2 (Relay-3)</div>
             <div className="miniRow">
-              <div className="kv"><span>Vrms</span><b>{v3 != null ? clampNum(v3, 1) : "—"} V</b></div>
-              <div className="kv"><span>Irms</span><b>{i3 != null ? clampNum(i3, 3) : "—"} A</b></div>
-              <div className="kv"><span>Power</span><b>{p3 != null ? clampNum(p3, 2) : "—"} W</b></div>
-              <div className="kv"><span>Energy</span><b>{e3Wh != null ? clampNum(e3Wh, 3) : "—"} Wh</b></div>
+              <div className="kv">
+                <span>Vrms</span>
+                <b>{v3 != null ? clampNum(v3, 1) : "—"} V</b>
+              </div>
+              <div className="kv">
+                <span>Irms</span>
+                <b>{i3 != null ? clampNum(i3, 3) : "—"} A</b>
+              </div>
+              <div className="kv">
+                <span>Power</span>
+                <b>{p3 != null ? clampNum(p3, 2) : "—"} W</b>
+              </div>
+              <div className="kv">
+                <span>Energy</span>
+                <b>{e3Wh != null ? clampNum(e3Wh, 3) : "—"} Wh</b>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Relay + automations */}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="cardHeader">
+          <div>
+            <div className="cardTitle">Relay Control & Automations</div>
+            <div className="small"></div>
+          </div>
+        </div>
+
+        <div className="loadGrid">
+          <RelayCardBackend
+            ch={1}
+            label="Load-1"
+            isOn={relay1 === 1}
+            disabled={disabled}
+            onToggle={toggleRelay}
+            timerVal={timerByCh[1]}
+            setTimerVal={(fn) =>
+              setTimerByCh((s) => ({
+                ...s,
+                1: typeof fn === "function" ? fn(s[1]) : fn,
+              }))
+            }
+            onStartTimer={startTimer}
+            timerRemainingSec={timerRemainingSec(1) + tick * 0}
+            onCancelTimer={cancelTimer}
+            schedule={schedulesDraft[1]}
+            setSchedule={(fn) =>
+              setSchedulesDraft((s) => ({
+                ...s,
+                1: typeof fn === "function" ? fn(s[1]) : fn,
+              }))
+            }
+            onScheduleFocus={(ch) => setEditingScheduleCh(ch)}
+            onScheduleBlur={() => setEditingScheduleCh(null)}
+            scheduleServer={schedulesServer[1]}
+            scheduleSavedAt={scheduleSavedAt[1]}
+            onApplySchedule={applySchedule}
+            onCancelSchedule={cancelSchedule}
+            cutoff={cutoffs[1]}
+            setCutoff={(fn) =>
+              setCutoffs((c) => ({
+                ...c,
+                1: typeof fn === "function" ? fn(c[1]) : fn,
+              }))
+            }
+            onApplyCutoff={applyCutoff}
+            timerMode={timers?.[1]?.mode || null}
+          />
+
+          <RelayCardBackend
+            ch={3}
+            label="Load-2"
+            isOn={relay3 === 1}
+            disabled={disabled}
+            onToggle={toggleRelay}
+            timerVal={timerByCh[3]}
+            setTimerVal={(fn) =>
+              setTimerByCh((s) => ({
+                ...s,
+                3: typeof fn === "function" ? fn(s[3]) : fn,
+              }))
+            }
+            onStartTimer={startTimer}
+            timerRemainingSec={timerRemainingSec(3) + tick * 0}
+            onCancelTimer={cancelTimer}
+            schedule={schedulesDraft[3]}
+            setSchedule={(fn) =>
+              setSchedulesDraft((s) => ({
+                ...s,
+                3: typeof fn === "function" ? fn(s[3]) : fn,
+              }))
+            }
+            onScheduleFocus={(ch) => setEditingScheduleCh(ch)}
+            onScheduleBlur={() => setEditingScheduleCh(null)}
+            onApplySchedule={applySchedule}
+            scheduleServer={schedulesServer[3]}
+            scheduleSavedAt={scheduleSavedAt[3]}
+            onCancelSchedule={cancelSchedule}
+            cutoff={cutoffs[3]}
+            setCutoff={(fn) =>
+              setCutoffs((c) => ({
+                ...c,
+                3: typeof fn === "function" ? fn(c[3]) : fn,
+              }))
+            }
+            onApplyCutoff={applyCutoff}
+            timerMode={timers?.[3]?.mode || null}
+          />
         </div>
       </div>
 
@@ -673,7 +1139,9 @@ export default function App() {
         <div className="cardHeader">
           <div>
             <div className="cardTitle">Charts</div>
-            <div className="small">Line + Bar + Pie for the selected timeframe</div>
+            <div className="small">
+              Line + Bar + Pie for the selected timeframe
+            </div>
           </div>
 
           <div className="actions">
@@ -725,11 +1193,15 @@ export default function App() {
             <div className="chartBox">
               {series.length === 0 ? (
                 <div className="small">
-                  No history data for this timeframe yet. Wait for telemetry or select a larger window.
+                  No history data for this timeframe yet. Wait for telemetry or
+                  select a larger window.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series} margin={{ top: 10, right: 18, bottom: 0, left: 0 }}>
+                  <LineChart
+                    data={series}
+                    margin={{ top: 10, right: 18, bottom: 0, left: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       dataKey="t"
@@ -747,8 +1219,22 @@ export default function App() {
                         return [`${n.toFixed(digits)} ${unit}`, name];
                       }}
                     />
-                    <Line type="monotone" dataKey={yKey[0]} name="Load-1" dot={false} stroke={colors.load1} strokeWidth={2} />
-                    <Line type="monotone" dataKey={yKey[1]} name="Load-3" dot={false} stroke={colors.load3} strokeWidth={2} />
+                    <Line
+                      type="monotone"
+                      dataKey={yKey[0]}
+                      name="Load-1"
+                      dot={false}
+                      stroke={colors.load1}
+                      strokeWidth={2}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey={yKey[1]}
+                      name="Load-2"
+                      dot={false}
+                      stroke={colors.load3}
+                      strokeWidth={2}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -762,7 +1248,10 @@ export default function App() {
                 <div className="small">No data in the selected window.</div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={avgBars} margin={{ top: 10, right: 18, bottom: 0, left: 0 }}>
+                  <BarChart
+                    data={avgBars}
+                    margin={{ top: 10, right: 18, bottom: 0, left: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" />
                     <YAxis width={52} domain={["auto", "auto"]} />
@@ -780,16 +1269,29 @@ export default function App() {
           </div>
 
           <div className="chartCard">
-            <div className="chartTitle">Pie chart: Energy share (Wh) in window</div>
+            <div className="chartTitle">
+              Pie chart: Energy share (Wh) in window
+            </div>
             <div className="chartBox">
               {energyPie.length === 0 ? (
                 <div className="small">No data in the selected window.</div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Tooltip formatter={(v) => [`${Number(v).toFixed(3)} Wh`, "Energy"]} />
+                    <Tooltip
+                      formatter={(v) => [
+                        `${Number(v).toFixed(3)} Wh`,
+                        "Energy",
+                      ]}
+                    />
                     <Legend />
-                    <Pie data={energyPie} dataKey="value" nameKey="name" outerRadius={90} label>
+                    <Pie
+                      data={energyPie}
+                      dataKey="value"
+                      nameKey="name"
+                      outerRadius={90}
+                      label
+                    >
                       <Cell fill={colors.load1} />
                       <Cell fill={colors.load3} />
                     </Pie>
@@ -798,60 +1300,6 @@ export default function App() {
               )}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Relay + automations */}
-      <div className="card" style={{ marginTop: 14 }}>
-        <div className="cardHeader">
-          <div>
-            <div className="cardTitle">Relay Control & Automations</div>
-            <div className="small">Automations are executed by the backend (timers/schedules/cutoffs)</div>
-          </div>
-        </div>
-
-        <div className="loadGrid">
-          <RelayCardBackend
-            ch={1}
-            label="Load-1"
-            isOn={relay1 === 1}
-            disabled={disabled}
-            onToggle={toggleRelay}
-            timerMin={timerMinByCh[1]}
-            setTimerMin={(v) => setTimerMinByCh((s) => ({ ...s, 1: v }))}
-            onStartTimer={startTimerOnFor}
-            timerRemainingSec={timerRemainingSec(1) + (tick * 0)}
-            onCancelTimer={cancelTimer}
-            schedule={schedules[1]}
-            setSchedule={(fn) => setSchedules((s) => ({ ...s, 1: typeof fn === "function" ? fn(s[1]) : fn }))}
-            onApplySchedule={applySchedule}
-            cutoff={cutoffs[1]}
-            setCutoff={(fn) => setCutoffs((c) => ({ ...c, 1: typeof fn === "function" ? fn(c[1]) : fn }))}
-            onApplyCutoff={applyCutoff}
-          />
-
-          <RelayCardBackend
-            ch={3}
-            label="Load-3"
-            isOn={relay3 === 1}
-            disabled={disabled}
-            onToggle={toggleRelay}
-            timerMin={timerMinByCh[3]}
-            setTimerMin={(v) => setTimerMinByCh((s) => ({ ...s, 3: v }))}
-            onStartTimer={startTimerOnFor}
-            timerRemainingSec={timerRemainingSec(3) + (tick * 0)}
-            onCancelTimer={cancelTimer}
-            schedule={schedules[3]}
-            setSchedule={(fn) => setSchedules((s) => ({ ...s, 3: typeof fn === "function" ? fn(s[3]) : fn }))}
-            onApplySchedule={applySchedule}
-            cutoff={cutoffs[3]}
-            setCutoff={(fn) => setCutoffs((c) => ({ ...c, 3: typeof fn === "function" ? fn(c[3]) : fn }))}
-            onApplyCutoff={applyCutoff}
-          />
-        </div>
-
-        <div className="footerNote">
-          The dashboard only configures automations. Execution happens in the backend even if the browser is closed.
         </div>
       </div>
 

@@ -515,3 +515,67 @@ body {
   background: transparent;
   border: 1px solid rgba(255,255,255,0.14);
 }
+
+.btn.masterOff {
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.15);
+}
+.btn.masterOff:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.overviewLine {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 10px;
+  align-items: stretch;
+}
+
+/* Make Stat boxes compact horizontally */
+.overviewLine .stat {
+  flex: 1 1 0;
+  min-width: 140px;
+}
+
+/* Mobile: wrap into 2 lines */
+@media (max-width: 720px) {
+  .overviewLine {
+    flex-wrap: wrap;
+  }
+  .overviewLine .stat {
+    flex: 1 1 calc(50% - 10px);
+    min-width: 160px;
+  }
+}
+
+/* Consistent spacing wrapper for chip + optional button */
+.timerStatusWrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;     /* if the row gets tight on mobile */
+  gap: 10px;           /* spacing between chip and button (and wrap lines) */
+  padding: 6px 10px;   /* spacing around the whole block */
+  margin-left: 8px;    /* optional: separation from previous inputs in same row */
+}
+
+/* When it wraps to next line, ensure vertical spacing stays nice */
+.timerStatusWrap > * {
+  margin: 0;           /* avoid inherited margins messing layout */
+}
+
+.scheduleStatusRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.chip.warn {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+  color: rgba(245, 158, 11, 0.95);
+  font-weight: 700;
+}

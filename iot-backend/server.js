@@ -65,8 +65,14 @@ const TimerSchema = new mongoose.Schema(
   {
     deviceId: { type: String, index: true },
     ch: { type: Number, enum: [1, 3], index: true },
-    endAt: { type: Date, index: true }, // when to auto-OFF
-    state: { type: Number, enum: [0, 1], default: 0 }, // state to set at end (usually 0)
+
+    // "on_for" => turn ON now, then OFF at end
+    // "off_for" => turn OFF now, then ON at end
+    mode: { type: String, enum: ["on_for", "off_for"], required: true },
+
+    endAt: { type: Date, index: true },
+    endState: { type: Number, enum: [0, 1], required: true },
+
     active: { type: Boolean, default: true },
   },
   { timestamps: true },
@@ -81,6 +87,7 @@ const ScheduleSchema = new mongoose.Schema(
     off: { type: String, default: "23:00" }, // "HH:MM"
     tz: { type: String, default: "Asia/Dhaka" },
     lastAppliedState: { type: Number, enum: [0, 1], default: 0 }, // to reduce repeat publishes
+    invert: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
@@ -123,6 +130,21 @@ mqttClient.on("connect", () => {
 function publishRelayCmd(deviceId, ch, state, meta = {}) {
   const cmd = { ch, state, ...meta };
   mqttClient.publish(`home/${deviceId}/cmd`, JSON.stringify(cmd));
+  updateDeviceRelayArray(deviceId, ch, state);
+}
+
+async function updateDeviceRelayArray(deviceId, ch, state) {
+  const idx = ch === 1 ? 0 : 1;
+  const path = `relay.${idx}`;
+  try {
+    await Device.updateOne(
+      { deviceId },
+      { $set: { [path]: state } },
+      { upsert: true },
+    );
+  } catch (e) {
+    console.error("[DB] updateDeviceRelayArray error:", e?.message || e);
+  }
 }
 
 function relayStateFromArray(ch, relayArr) {
@@ -153,7 +175,10 @@ function startAutomationEngine() {
       endAt: { $lte: now },
     }).lean();
     for (const t of due) {
-      publishRelayCmd(t.deviceId, t.ch, t.state, { reason: "timer" });
+      publishRelayCmd(t.deviceId, t.ch, t.endState, {
+        reason: "timer",
+        mode: t.mode,
+      });
       await Timer.updateOne({ _id: t._id }, { $set: { active: false } });
     }
   }, 1000);
@@ -171,7 +196,8 @@ function startAutomationEngine() {
     for (const s of scheds) {
       const onMin = minutesFromHHMM(s.on);
       const offMin = minutesFromHHMM(s.off);
-      const desired = isWithinWindow(nowDhakaMin, onMin, offMin) ? 1 : 0;
+      let desired = isWithinWindow(nowDhakaMin, onMin, offMin) ? 1 : 0;
+if (s.invert) desired = desired ? 0 : 1;
 
       // Avoid spamming: only publish if desired differs from lastAppliedState
       if (desired !== (s.lastAppliedState ?? 0)) {
@@ -324,18 +350,53 @@ app.get("/api/history/:deviceId", async (req, res) => {
 // Relay command: POST { "ch": 1, "state": 1 }
 app.post("/api/relay/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
-  const { ch, state } = req.body;
+  const ch = Number(req.body.ch);
+  const state = Number(req.body.state);
 
   if (![1, 3].includes(ch) || ![0, 1].includes(state)) {
-    return res
-      .status(400)
-      .json({ ok: false, error: "ch must be 1 or 3 and state must be 0/1" });
+    return res.status(400).json({
+      ok: false,
+      error: "ch must be 1 or 3 and state must be 0/1",
+    });
   }
 
-  const cmd = { ch, state };
-  mqttClient.publish(`home/${deviceId}/cmd`, JSON.stringify(cmd));
+  // Cancel any active timer for this channel (manual override)
+  const cancelRes = await Timer.updateMany(
+    { deviceId, ch, active: true },
+    { $set: { active: false } }
+  );
 
-  res.json({ ok: true, published: cmd });
+  // Use publishRelayCmd so Device.relay[] is updated consistently
+  publishRelayCmd(deviceId, ch, state, { reason: "manual" });
+
+  res.json({
+    ok: true,
+    published: { ch, state },
+    timerCancelled: (cancelRes.modifiedCount || cancelRes.nModified || 0) > 0,
+    cancelledCount: cancelRes.modifiedCount || cancelRes.nModified || 0,
+  });
+});
+
+
+// Master OFF: POST { "state": 0 } (or 1 if you want master ON too)
+app.post("/api/relayAll/:deviceId", async (req, res) => {
+  const { deviceId } = req.params;
+  const state = Number(req.body.state);
+
+  if (![0, 1].includes(state)) {
+    return res.status(400).json({ ok: false, error: "state must be 0 or 1" });
+  }
+
+  // Cancel all active timers for this device
+  await Timer.updateMany(
+    { deviceId, active: true },
+    { $set: { active: false } }
+  );
+
+  publishRelayCmd(deviceId, 1, state, { reason: "master" });
+  publishRelayCmd(deviceId, 3, state, { reason: "master" });
+
+  res.json({ ok: true, deviceId, relay: [state, state] });
 });
 
 app.get("/api/device/:deviceId", async (req, res) => {
@@ -344,34 +405,59 @@ app.get("/api/device/:deviceId", async (req, res) => {
   res.json(dev || null);
 });
 
-// POST /api/timer/:deviceId  { "ch": 1, "minutes": 10 }
+// POST /api/timer/:deviceId
+// Body: { ch:1|3, mode:"on_for"|"off_for", minutes:0..720, seconds:0..59 }
 app.post("/api/timer/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
-  const { ch, minutes } = req.body;
+  const { ch, mode, minutes, seconds } = req.body;
 
-  if (
-    ![1, 3].includes(ch) ||
-    !Number.isFinite(minutes) ||
-    minutes <= 0 ||
-    minutes > 720
-  ) {
+  if (![1, 3].includes(ch)) {
+    return res.status(400).json({ ok: false, error: "ch must be 1 or 3" });
+  }
+  if (!["on_for", "off_for"].includes(mode)) {
     return res
       .status(400)
-      .json({ ok: false, error: "ch must be 1/3 and minutes 1..720" });
+      .json({ ok: false, error: "mode must be on_for/off_for" });
   }
 
-  const endAt = new Date(Date.now() + minutes * 60 * 1000);
+  const m = Number(minutes || 0);
+  const s = Number(seconds || 0);
+  if (!Number.isFinite(m) || !Number.isFinite(s) || m < 0 || s < 0 || s > 59) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "minutes>=0 and seconds 0..59 required" });
+  }
 
-  // Turn ON immediately, then create timer for OFF
-  publishRelayCmd(deviceId, ch, 1, { reason: "timer_start" });
+  const durationSec = m * 60 + s;
+  if (durationSec <= 0 || durationSec > 12 * 60 * 60) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "duration must be 1..43200 seconds" });
+  }
+
+  // cancel any previous active timer for this ch
+  await Timer.updateMany(
+    { deviceId, ch, active: true },
+    { $set: { active: false } },
+  );
+
+  // apply immediate state now + decide endState
+  const startState = mode === "on_for" ? 1 : 0;
+  const endState = mode === "on_for" ? 0 : 1;
+
+  publishRelayCmd(deviceId, ch, startState, { reason: "timer_start", mode });
+
+  const endAt = new Date(Date.now() + durationSec * 1000);
 
   const doc = await Timer.create({
     deviceId,
     ch,
+    mode,
     endAt,
-    state: 0,
+    endState,
     active: true,
   });
+
   res.json({ ok: true, timer: doc });
 });
 
@@ -412,17 +498,25 @@ app.post("/api/cutoff/:deviceId", async (req, res) => {
 // POST /api/schedule/:deviceId  { "ch": 1, "enabled": true, "on":"18:00", "off":"23:00" }
 app.post("/api/schedule/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
-  const { ch, enabled, on, off } = req.body;
+  const { ch, enabled, on, off, invert } = req.body;
 
   if (![1, 3].includes(ch)) {
     return res.status(400).json({ ok: false, error: "ch must be 1/3" });
   }
 
-  const doc = await Schedule.findOneAndUpdate(
-    { deviceId, ch },
-    { $set: { enabled: !!enabled, on: on || "18:00", off: off || "23:00" } },
-    { upsert: true, new: true },
-  );
+const doc = await Schedule.findOneAndUpdate(
+  { deviceId, ch },
+  {
+    $set: {
+      enabled: !!enabled,
+      on: on || "18:00",
+      off: off || "23:00",
+      invert: !!invert,
+    },
+  },
+  { upsert: true, new: true }
+);
+
 
   res.json({ ok: true, schedule: doc });
 });
@@ -439,8 +533,14 @@ app.get("/api/automations/:deviceId", async (req, res) => {
 
   // normalize to {1:{...}, 3:{...}} with defaults
   const tByCh = { 1: null, 3: null };
-  for (const t of timers) tByCh[t.ch] = { endAt: t.endAt, state: t.state, active: t.active };
-
+  for (const t of timers) {
+    tByCh[t.ch] = {
+      endAt: t.endAt,
+      active: t.active,
+      mode: t.mode,
+      endState: t.endState,
+    };
+  }
   const sByCh = {
     1: { enabled: false, on: "18:00", off: "23:00" },
     3: { enabled: false, on: "18:00", off: "23:00" },
@@ -450,6 +550,7 @@ app.get("/api/automations/:deviceId", async (req, res) => {
       enabled: !!s.enabled,
       on: s.on || "18:00",
       off: s.off || "23:00",
+      invert: !!s.invert,
     };
   }
 
@@ -466,6 +567,21 @@ app.get("/api/automations/:deviceId", async (req, res) => {
   }
 
   res.json({ ok: true, timers: tByCh, schedules: sByCh, cutoffs: cByCh });
+});
+
+// DELETE /api/schedule/:deviceId/:ch  -> delete schedule entry
+app.delete("/api/schedule/:deviceId/:ch", async (req, res) => {
+  const { deviceId, ch } = req.params;
+  const channel = Number(ch);
+
+  if (![1, 3].includes(channel)) {
+    return res.status(400).json({ ok: false, error: "ch must be 1/3" });
+  }
+
+  // Delete the schedule document completely
+  const result = await Schedule.deleteOne({ deviceId, ch: channel });
+
+  res.json({ ok: true, deletedCount: result.deletedCount || 0 });
 });
 
 // ---------- Start ----------
