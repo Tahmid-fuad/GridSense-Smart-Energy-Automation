@@ -298,21 +298,6 @@ mqttClient.on("message", async (topic, buf) => {
       for (const r of rules) {
         const relayOn = relayStateFromArray(r.ch, doc.relay) === 1;
 
-        // If relay is OFF => reset baseline so next ON starts fresh
-        if (!relayOn) {
-          if (
-            r.startWh != null ||
-            r.lastWh != null ||
-            (r.consumedmWh || 0) !== 0
-          ) {
-            await Cutoff.updateOne(
-              { _id: r._id },
-              { $set: { startWh: null, lastWh: null, consumedmWh: 0 } },
-            );
-          }
-          continue;
-        }
-
         // Use ESP32 per-channel cumulative energy (Wh)
         const eWh = r.ch === 1 ? doc.e1Wh : doc.e3Wh;
         if (typeof eWh !== "number") continue;
@@ -320,7 +305,7 @@ mqttClient.on("message", async (topic, buf) => {
         const limitmWh = Number(r.limitmWh ?? 0);
         if (!Number.isFinite(limitmWh) || limitmWh <= 0) continue;
 
-        // First packet after turning ON (or after energy counter reset)
+        // Initialize baseline once (or if ESP32 counter resets)
         if (r.startWh == null || r.lastWh == null || eWh + EPS < r.lastWh) {
           await Cutoff.updateOne(
             { _id: r._id },
@@ -338,15 +323,15 @@ mqttClient.on("message", async (topic, buf) => {
           { $set: { lastWh: eWh, consumedmWh } },
         );
 
-        // Trigger auto-OFF when budget reached
-        if (consumedmWh >= limitmWh) {
+        // Only trigger auto-OFF if relay is currently ON
+        if (relayOn && consumedmWh >= limitmWh) {
           publishRelayCmd(doc.deviceId, r.ch, 0, {
             reason: "energy_budget",
             consumedmWh: Number(consumedmWh.toFixed(2)),
             limitmWh,
           });
 
-          // Reset baseline so it won't instantly re-trigger
+          // Reset after cutoff triggers (prevents instant re-trigger loop)
           await Cutoff.updateOne(
             { _id: r._id },
             { $set: { startWh: null, lastWh: null, consumedmWh: 0 } },
@@ -605,17 +590,17 @@ app.get("/api/automations/:deviceId", async (req, res) => {
   }
 
   const cByCh = {
-  1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
-  3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
-};
-
-for (const c of cutoffs) {
-  cByCh[c.ch] = {
-    enabled: !!c.enabled,
-    limitmWh: Number(c.limitmWh ?? 1000),
-    consumedmWh: Number(c.consumedmWh ?? 0),
+    1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+    3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
   };
-}
+
+  for (const c of cutoffs) {
+    cByCh[c.ch] = {
+      enabled: !!c.enabled,
+      limitmWh: Number(c.limitmWh ?? 1000),
+      consumedmWh: Number(c.consumedmWh ?? 0),
+    };
+  }
 
   res.json({ ok: true, timers: tByCh, schedules: sByCh, cutoffs: cByCh });
 });
