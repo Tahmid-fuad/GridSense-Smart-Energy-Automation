@@ -503,6 +503,210 @@ function RelayCardBackend({
   );
 }
 
+function BellIcon({ size = 34 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.73 21a2 2 0 0 1-3.46 0"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TripNumberField({ label, value, placeholder, onChange, onUserEdit }) {
+  return (
+    <div className="tripField">
+      <div className="small">{label}</div>
+      <input
+        className="input"
+        type="number"
+        value={value}
+        placeholder={placeholder}
+        onFocus={onUserEdit}
+        onChange={(e) => {
+          onUserEdit?.();
+          onChange(e.target.value);
+        }}
+      />
+    </div>
+  );
+}
+
+function TripSettingsModal({
+  open,
+  onClose,
+  draft,
+  setDraft,
+  onSave,
+  onResetLatch,
+  latched,
+  onUserEdit, 
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="modalBackdrop" onMouseDown={onClose}>
+      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <div>
+            <div className="modalTitle">Trip Settings</div>
+            <div className="small">Leave a field empty to disable that bound.</div>
+          </div>
+          <button className="btn ghost" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className={`chip ${latched ? "warn" : "muted"}`} style={{ marginBottom: 12 }}>
+          {latched ? (
+            <>Trip is <b>LATCHED</b> (system already tripped)</>
+          ) : (
+            <>Trip latch: <b>OK</b></>
+          )}
+        </div>
+
+        <div className="tripGrid">
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Voltage (V)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.vMin}
+                placeholder="e.g. 180"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, vMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.vMax}
+                placeholder="e.g. 250"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, vMax: v }))}
+              />
+            </div>
+          </div>
+
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Current (A)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.iMin}
+                placeholder="e.g. 0.05"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, iMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.iMax}
+                placeholder="e.g. 2.5"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, iMax: v }))}
+              />
+            </div>
+          </div>
+
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Power (W)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.pMin}
+                placeholder="e.g. 5"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, pMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.pMax}
+                placeholder="e.g. 500"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, pMax: v }))}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="modalActions">
+          {latched && (
+            <button className="btn" type="button" onClick={onResetLatch}>
+              Reset Trip
+            </button>
+          )}
+          <button className="btn" type="button" onClick={onSave}>
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TripNotificationsPanel({ open, anchorRef, events }) {
+  if (!open) return null;
+
+  return (
+    <div className="notifPanel" role="dialog" aria-label="Trip notifications">
+      <div className="notifHeader">
+        <div className="notifTitle">Trip Noti
+          fications</div>
+        <div className="small">Recent trip actions and faults</div>
+      </div>
+
+      <div className="notifList">
+        {events?.length ? (
+          events.map((e) => (
+            <div key={e._id || e.createdAt} className="notifItem">
+              <div className={`notifBadge ${e.level}`}>
+                {e.level === "fault"
+                  ? "FAULT"
+                  : e.level === "success"
+                    ? "SUCCESS"
+                    : "INFO"}
+              </div>
+              <div className="notifBody">
+                <div className="notifMsg">{e.message || "—"}</div>
+                <div className="notifMeta">
+                  <span>
+                    {new Date(e.createdAt).toLocaleString([], {
+                      hour12: false,
+                    })}
+                  </span>
+                  {e.fault ? (
+                    <span className="notifFault"> • {e.fault}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="small" style={{ padding: 10 }}>
+            No trip logs yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [latest, setLatest] = useState(null);
   const [device, setDevice] = useState(null);
@@ -511,6 +715,40 @@ export default function App() {
   const [loadingRelay, setLoadingRelay] = useState(false);
   const [error, setError] = useState("");
   const [scheduleSavedAt, setScheduleSavedAt] = useState({ 1: null, 3: null });
+
+  // --- Trip / fault detection ---
+  const [tripOpen, setTripOpen] = useState(false);
+  const tripOpenRef = useRef(false);
+  useEffect(() => {
+    tripOpenRef.current = tripOpen;
+  }, [tripOpen]);
+
+  const [editingTrip, setEditingTrip] = useState(false);
+  const editingTripRef = useRef(false);
+  useEffect(() => {
+    editingTripRef.current = editingTrip;
+  }, [editingTrip]);
+
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const [tripEvents, setTripEvents] = useState([]);
+  const [tripLatched, setTripLatched] = useState(false);
+
+  const [tripServer, setTripServer] = useState(null); // backend truth
+  const [tripDraft, setTripDraft] = useState({
+    vMin: "",
+    vMax: "",
+    iMin: "",
+    iMax: "",
+    pMin: "",
+    pMax: "",
+  });
+
+  useEffect(() => {
+    editingTripRef.current = editingTrip;
+  }, [editingTrip]);
+
+  const notifWrapRef = useRef(null);
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
@@ -802,7 +1040,7 @@ export default function App() {
       setLoadingRelay(true);
       setError("");
 
-      const c = cutoffsDraft[ch]; // ✅ use what user edited
+      const c = cutoffsDraft[ch];
 
       await axios.post(`${API_BASE}/api/cutoff/${DEVICE_ID}`, {
         ch,
@@ -816,6 +1054,70 @@ export default function App() {
       await fetchAutomations(); // refresh from backend
     } catch {
       setError("Energy cutoff save failed. Check backend logs.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
+  async function fetchTrip() {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/trip/${DEVICE_ID}?limit=200`,
+      );
+      const s = res.data?.settings || null;
+
+      setTripLatched(!!s?.latched);
+      setTripEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+
+      if (!tripOpenRef.current && !editingTripRef.current) {
+        setTripDraft({
+          vMin: s?.vMin ?? "",
+          vMax: s?.vMax ?? "",
+          iMin: s?.iMin ?? "",
+          iMax: s?.iMax ?? "",
+          pMin: s?.pMin ?? "",
+          pMax: s?.pMax ?? "",
+        });
+      }
+
+      return s;
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveTripSettings() {
+    try {
+      setLoadingRelay(true);
+      setError("");
+
+      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/settings`, {
+        vMin: tripDraft.vMin,
+        vMax: tripDraft.vMax,
+        iMin: tripDraft.iMin,
+        iMax: tripDraft.iMax,
+        pMin: tripDraft.pMin,
+        pMax: tripDraft.pMax,
+      });
+
+      await fetchTrip();
+      setTripOpen(false);
+      setEditingTrip(false);
+    } catch (e) {
+      setError(e?.response?.data?.error || "Trip settings save failed.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
+  async function resetTripLatch() {
+    try {
+      setLoadingRelay(true);
+      setError("");
+      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/reset`);
+      await fetchTrip();
+    } catch {
+      setError("Trip reset failed.");
     } finally {
       setLoadingRelay(false);
     }
@@ -871,6 +1173,37 @@ export default function App() {
   useEffect(() => {
     editingCutoffChRef.current = editingCutoffCh;
   }, [editingCutoffCh]);
+
+  useEffect(() => {
+    fetchLatest();
+    fetchHistory();
+    fetchAutomations();
+    fetchTrip();
+
+    const t = setInterval(fetchLatest, 2000);
+    const h = setInterval(fetchHistory, 8000);
+    const a = setInterval(fetchAutomations, 10000);
+    const tr = setInterval(fetchTrip, 12000);
+    const k = setInterval(() => setTick((x) => x + 1), 1000);
+
+    return () => {
+      clearInterval(t);
+      clearInterval(h);
+      clearInterval(a);
+      clearInterval(tr);
+      clearInterval(k);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!notifOpen) return;
+      if (!notifWrapRef.current) return;
+      if (!notifWrapRef.current.contains(e.target)) setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [notifOpen]);
 
   // Relay array is now [relay1State, relay3State]
   const relayArr = latest?.relay || device?.relay || [0, 0];
@@ -1037,9 +1370,47 @@ export default function App() {
           <div className="pill">
             Last seen: <b>{lastSeenText}</b>
           </div>
+
           <button className="btn" onClick={fetchLatest} type="button">
             Refresh
           </button>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              const s = await fetchTrip(); // latest once
+
+              setTripDraft({
+                vMin: s?.vMin ?? "",
+                vMax: s?.vMax ?? "",
+                iMin: s?.iMin ?? "",
+                iMax: s?.iMax ?? "",
+                pMin: s?.pMin ?? "",
+                pMax: s?.pMax ?? "",
+              });
+
+              setEditingTrip(false); // unlock initially
+              setTripOpen(true);
+            }}
+          >
+            Trip Settings
+          </button>
+
+          <div ref={notifWrapRef} className="notifWrap">
+            <button
+              className={`iconBtn ${tripLatched ? "warn" : ""}`}
+              type="button"
+              onClick={() => setNotifOpen((s) => !s)}
+              title="Trip notifications"
+            >
+              <BellIcon size={26} />
+              {tripLatched ? <span className="notifDot" /> : null}
+            </button>
+
+            <TripNotificationsPanel open={notifOpen} events={tripEvents} />
+          </div>
+
           <button
             className="btn masterOff"
             onClick={masterOff}
@@ -1437,6 +1808,19 @@ export default function App() {
 
       {/* keep tick alive for countdown refresh */}
       <div style={{ display: "none" }}>{tick}</div>
+      <TripSettingsModal
+        open={tripOpen}
+        onClose={() => {
+          setTripOpen(false);
+          setEditingTrip(false);
+        }}
+        draft={tripDraft}
+        setDraft={setTripDraft}
+        onSave={saveTripSettings}
+        onResetLatch={resetTripLatch}
+        latched={tripLatched}
+        onUserEdit={() => setEditingTrip(true)}
+      />
     </div>
   );
 }

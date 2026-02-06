@@ -111,6 +111,56 @@ const CutoffSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+// ---------- Trip / Fault detection ----------
+const TripSettingsSchema = new mongoose.Schema(
+  {
+    deviceId: { type: String, unique: true, index: true },
+
+    // Thresholds (null => disabled)
+    vMin: { type: Number, default: null },
+    vMax: { type: Number, default: null },
+    iMin: { type: Number, default: null },
+    iMax: { type: Number, default: null },
+    pMin: { type: Number, default: null },
+    pMax: { type: Number, default: null },
+
+    // Latch: if tripped once, don't keep spamming OFF
+    latched: { type: Boolean, default: false },
+    latchedAt: { type: Date, default: null },
+    lastFault: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
+const TripEventSchema = new mongoose.Schema(
+  {
+    deviceId: { type: String, index: true },
+
+    // "success" | "fault" | "info"
+    level: {
+      type: String,
+      enum: ["success", "fault", "info"],
+      default: "info",
+    },
+
+    // "settings_saved" | "settings_cleared" | "trip_triggered" | "trip_reset" ...
+    kind: { type: String, default: "info" },
+
+    // short fault tag (e.g., "V_HIGH", "P_LOW")
+    fault: { type: String, default: "" },
+
+    message: { type: String, default: "" },
+    meta: { type: Object, default: {} },
+  },
+  { timestamps: true },
+);
+
+const TripSettings = mongoose.model(
+  "TripSettings",
+  TripSettingsSchema,
+  "trip_settings",
+);
+const TripEvent = mongoose.model("TripEvent", TripEventSchema, "trip_events");
 
 const Timer = mongoose.model("Timer", TimerSchema, "timers");
 const Schedule = mongoose.model("Schedule", ScheduleSchema, "schedules");
@@ -237,6 +287,113 @@ function cutoffsEqual(a, b) {
   );
 }
 
+function numberOrNull(x) {
+  if (x === "" || x === undefined || x === null) return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function logTripEvent(
+  deviceId,
+  { level = "info", kind = "info", fault = "", message = "", meta = {} },
+) {
+  try {
+    await TripEvent.create({ deviceId, level, kind, fault, message, meta });
+  } catch (e) {
+    console.error("[DB] TripEvent log error:", e?.message || e);
+  }
+}
+
+async function tripAllOff(deviceId, meta = {}) {
+  // same behavior intent as master kill: cancel timers + publish OFF
+  await Timer.updateMany(
+    { deviceId, active: true },
+    { $set: { active: false } },
+  );
+  publishRelayCmd(deviceId, 1, 0, { reason: "trip", ...meta });
+  publishRelayCmd(deviceId, 3, 0, { reason: "trip", ...meta });
+}
+
+function hasAnyThreshold(s) {
+  return ["vMin", "vMax", "iMin", "iMax", "pMin", "pMax"].some(
+    (k) => typeof s?.[k] === "number",
+  );
+}
+
+function checkTripViolations({ v, i, p }, s) {
+  const faults = [];
+  const add = (tag, msg) => faults.push({ tag, msg });
+
+  if (typeof v === "number") {
+    if (typeof s.vMin === "number" && v < s.vMin)
+      add("V_LOW", `Voltage low: ${v.toFixed(2)} < ${s.vMin}`);
+    if (typeof s.vMax === "number" && v > s.vMax)
+      add("V_HIGH", `Voltage high: ${v.toFixed(2)} > ${s.vMax}`);
+  }
+  if (typeof i === "number") {
+    if (typeof s.iMin === "number" && i < s.iMin)
+      add("I_LOW", `Current low: ${i.toFixed(3)} < ${s.iMin}`);
+    if (typeof s.iMax === "number" && i > s.iMax)
+      add("I_HIGH", `Current high: ${i.toFixed(3)} > ${s.iMax}`);
+  }
+  if (typeof p === "number") {
+    if (typeof s.pMin === "number" && p < s.pMin)
+      add("P_LOW", `Power low: ${p.toFixed(2)} < ${s.pMin}`);
+    if (typeof s.pMax === "number" && p > s.pMax)
+      add("P_HIGH", `Power high: ${p.toFixed(2)} > ${s.pMax}`);
+  }
+
+  return faults;
+}
+
+async function evaluateTripOnTelemetry(doc) {
+  const deviceId = doc.deviceId;
+  const s = await TripSettings.findOne({ deviceId }).lean();
+  if (!s || !hasAnyThreshold(s)) return;
+
+  // latched => do nothing until user resets
+  if (s.latched) return;
+
+  // totals (your ESP sends these already)
+  const v = typeof doc.voltage === "number" ? doc.voltage : null;
+  const i = typeof doc.current === "number" ? doc.current : null;
+  const p = typeof doc.power === "number" ? doc.power : null;
+
+  const faults = checkTripViolations({ v, i, p }, s);
+  if (!faults.length) return;
+
+  const faultTag = faults.map((f) => f.tag).join("|");
+  const msg = faults.map((f) => f.msg).join(" • ");
+
+  await TripSettings.updateOne(
+    { deviceId },
+    { $set: { latched: true, latchedAt: new Date(), lastFault: msg } },
+    { upsert: true },
+  );
+
+  await logTripEvent(deviceId, {
+    level: "fault",
+    kind: "trip_triggered",
+    fault: faultTag,
+    message: msg,
+    meta: {
+      v,
+      i,
+      p,
+      settings: {
+        vMin: s.vMin,
+        vMax: s.vMax,
+        iMin: s.iMin,
+        iMax: s.iMax,
+        pMin: s.pMin,
+        pMax: s.pMax,
+      },
+    },
+  });
+
+  await tripAllOff(deviceId, { fault: faultTag });
+}
+
 mqttClient.on("message", async (topic, buf) => {
   const text = buf.toString();
   let data;
@@ -338,6 +495,8 @@ mqttClient.on("message", async (topic, buf) => {
           );
         }
       }
+
+      await evaluateTripOnTelemetry(doc);
 
       // Optional: print a short log so you see it's working
       console.log(
@@ -632,6 +791,84 @@ app.delete("/api/cutoff/:deviceId/:ch", async (req, res) => {
   const result = await Cutoff.deleteOne({ deviceId, ch: channel });
 
   res.json({ ok: true, deletedCount: result.deletedCount || 0 });
+});
+
+// GET trip settings + recent events
+app.get("/api/trip/:deviceId", async (req, res) => {
+  const { deviceId } = req.params;
+  const limit = Math.min(parseInt(req.query.limit || "100", 10), 500);
+
+  const [settings, events] = await Promise.all([
+    TripSettings.findOne({ deviceId }).lean(),
+    TripEvent.find({ deviceId }).sort({ createdAt: -1 }).limit(limit).lean(),
+  ]);
+
+  res.json({ ok: true, settings: settings || null, events: events || [] });
+});
+
+// Save/Update trip thresholds (any field can be empty => null)
+// POST body: { vMin, vMax, iMin, iMax, pMin, pMax }
+app.post("/api/trip/:deviceId/settings", async (req, res) => {
+  const { deviceId } = req.params;
+
+  const next = {
+    vMin: numberOrNull(req.body.vMin),
+    vMax: numberOrNull(req.body.vMax),
+    iMin: numberOrNull(req.body.iMin),
+    iMax: numberOrNull(req.body.iMax),
+    pMin: numberOrNull(req.body.pMin),
+    pMax: numberOrNull(req.body.pMax),
+  };
+
+  // optional sanity checks (only when both exist)
+  const bad =
+    (next.vMin != null && next.vMax != null && next.vMin >= next.vMax) ||
+    (next.iMin != null && next.iMax != null && next.iMin >= next.iMax) ||
+    (next.pMin != null && next.pMax != null && next.pMin >= next.pMax);
+
+  if (bad)
+    return res
+      .status(400)
+      .json({ ok: false, error: "Min must be < Max (where both are set)." });
+
+  // update + reset latch on settings change (so system can trip again properly)
+  const doc = await TripSettings.findOneAndUpdate(
+    { deviceId },
+    { $set: { ...next, latched: false, latchedAt: null, lastFault: "" } },
+    { upsert: true, new: true },
+  );
+
+  const kind = hasAnyThreshold(doc) ? "settings_saved" : "settings_cleared";
+
+  await logTripEvent(deviceId, {
+    level: "success",
+    kind,
+    message: hasAnyThreshold(doc)
+      ? "Trip thresholds saved."
+      : "Trip thresholds cleared (all empty).",
+    meta: next,
+  });
+
+  res.json({ ok: true, settings: doc });
+});
+
+// Reset trip latch (after a trip)
+app.post("/api/trip/:deviceId/reset", async (req, res) => {
+  const { deviceId } = req.params;
+
+  const doc = await TripSettings.findOneAndUpdate(
+    { deviceId },
+    { $set: { latched: false, latchedAt: null, lastFault: "" } },
+    { upsert: true, new: true },
+  );
+
+  await logTripEvent(deviceId, {
+    level: "success",
+    kind: "trip_reset",
+    message: "Trip latch reset.",
+  });
+
+  res.json({ ok: true, settings: doc });
 });
 
 // ---------- Start ----------
