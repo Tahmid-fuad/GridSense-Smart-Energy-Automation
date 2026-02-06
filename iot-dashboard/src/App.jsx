@@ -62,6 +62,19 @@ function schedulesEqual(a, b) {
   );
 }
 
+function normalizeCutoff(c) {
+  return {
+    enabled: !!c?.enabled,
+    limitmWh: Number(c?.limitmWh ?? 1000),
+  };
+}
+
+function cutoffsEqual(a, b) {
+  const A = normalizeCutoff(a);
+  const B = normalizeCutoff(b);
+  return A.enabled === B.enabled && A.limitmWh === B.limitmWh;
+}
+
 function RelayCardBackend({
   ch,
   label,
@@ -90,6 +103,10 @@ function RelayCardBackend({
   cutoff,
   setCutoff,
   onApplyCutoff,
+  cutoffServer,
+  cutoffSavedAt,
+  onCutoffFocus,
+  onCancelCutoff,
 }) {
   const enabled = !!schedule?.enabled;
   const saved = scheduleServer
@@ -97,6 +114,17 @@ function RelayCardBackend({
     : true;
   const onLabel = schedule?.invert ? "OFF" : "ON";
   const offLabel = schedule?.invert ? "ON" : "OFF";
+  const cutoffEnabled = !!cutoff?.enabled;
+  const cutoffSaved = cutoffServer ? cutoffsEqual(cutoff, cutoffServer) : true;
+  const appliedLimit =
+    typeof cutoffServer?.limitmWh === "number" ? cutoffServer.limitmWh : null;
+
+  const usedmWh =
+    typeof cutoffServer?.consumedmWh === "number"
+      ? cutoffServer.consumedmWh
+      : typeof cutoff?.consumedmWh === "number"
+        ? cutoff.consumedmWh
+        : 0;
 
   return (
     <div className="loadCard">
@@ -126,15 +154,7 @@ function RelayCardBackend({
 
         {/* ON FOR row */}
         <div className="row">
-          <button
-            className="btn"
-            type="button"
-            onClick={() => onStartTimer(ch, "on_for")}
-            disabled={disabled}
-            title="Turn ON now, then OFF after the duration"
-          >
-            Turn ON for
-          </button>
+          <div className="small">Turn OFF after</div>
 
           <input
             className="input"
@@ -181,19 +201,21 @@ function RelayCardBackend({
             disabled={disabled}
           />
           <div className="small">sec</div>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={() => onStartTimer(ch, "on_for")}
+            disabled={disabled}
+            title="Turn ON now, then OFF after the duration"
+          >
+            Apply
+          </button>
         </div>
 
         {/* OFF FOR row */}
         <div className="row" style={{ marginTop: 8 }}>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => onStartTimer(ch, "off_for")}
-            disabled={disabled}
-            title="Turn OFF now, then ON after the duration"
-          >
-            Turn OFF for
-          </button>
+          <div className="small">Turn ON after</div>
 
           <input
             className="input"
@@ -240,6 +262,16 @@ function RelayCardBackend({
             disabled={disabled}
           />
           <div className="small">sec</div>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={() => onStartTimer(ch, "off_for")}
+            disabled={disabled}
+            title="Turn OFF now, then ON after the duration"
+          >
+            Apply
+          </button>
         </div>
         <div className="timerStatusWrap">
           <div className={`chip ${timerRemainingSec > 0 ? "" : "muted"}`}>
@@ -377,67 +409,96 @@ function RelayCardBackend({
         </div>
       </div>
 
-      {/* Cutoff */}
-      {/* <div className="miniSection">
-        <div className="miniTitle">Power-based auto cutoff </div>
+      {/* Energy budget auto-off */}
+      <div className="miniSection">
+        <div className="miniTitle">Energy budget auto-off</div>
         <div className="row">
           <label className="check">
             <input
               type="checkbox"
               checked={!!cutoff.enabled}
-              onChange={(e) =>
-                setCutoff((r) => ({ ...r, enabled: e.target.checked }))
-              }
+              onChange={(e) => {
+                onCutoffFocus?.(ch);
+                setCutoff((r) => ({ ...r, enabled: e.target.checked }));
+              }}
               disabled={disabled}
             />
             Enable
           </label>
 
-          <div className="small">If P &gt;</div>
+          <div className="small">Turn OFF after</div>
+
           <input
             className="input"
-            style={{ width: 110 }}
+            style={{ width: 80 }}
             type="number"
             min={1}
-            max={5000}
-            value={cutoff.thresholdW}
-            onChange={(e) =>
+            max={500000}
+            value={cutoff.limitmWh ?? 1000}
+            onFocus={() => onCutoffFocus?.(ch)}
+            onChange={(e) => {
+              onCutoffFocus?.(ch);
               setCutoff((r) => ({
                 ...r,
-                thresholdW: Math.max(1, Math.min(5000, Number(e.target.value))),
-              }))
-            }
+                limitmWh: Math.max(1, Math.min(500000, Number(e.target.value))),
+              }));
+            }}
             disabled={disabled || !cutoff.enabled}
           />
-          <div className="small">W for</div>
-          <input
-            className="input"
-            style={{ width: 90 }}
-            type="number"
-            min={1}
-            max={600}
-            value={cutoff.holdSec}
-            onChange={(e) =>
-              setCutoff((r) => ({
-                ...r,
-                holdSec: Math.max(1, Math.min(600, Number(e.target.value))),
-              }))
-            }
-            disabled={disabled || !cutoff.enabled}
-          />
-          <div className="small">sec → OFF</div>
+          <div className="small">mWh</div>
+
+          <div className={`chip ${cutoff.enabled ? "" : "muted"}`}>
+            {cutoff.enabled ? (
+              <>
+                Used: <b>{Number(usedmWh).toFixed(1)} mWh</b>
+                {"  "} / Limit:{" "}
+                <b>{appliedLimit != null ? appliedLimit : "—"} mWh</b>
+              </>
+            ) : (
+              <>Disabled</>
+            )}
+          </div>
 
           <button
             className="btn"
             type="button"
             onClick={() => onApplyCutoff(ch)}
             disabled={disabled}
-            title="Save cutoff rule to backend"
+            title="Save energy budget cutoff rule to backend"
           >
             Apply
           </button>
+
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => onCancelCutoff(ch)}
+            disabled={disabled}
+            title="Delete energy cutoff rule from backend"
+          >
+            Cancel
+          </button>
+
+          <div className={`chip ${cutoffSaved ? "" : "warn"}`}>
+            {cutoffSaved ? (
+              <>
+                Saved
+                {cutoffSavedAt ? (
+                  <span className="small">
+                    {" "}
+                    •{" "}
+                    {new Date(cutoffSavedAt).toLocaleTimeString([], {
+                      hour12: false,
+                    })}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <>Unsaved changes</>
+            )}
+          </div>
         </div>
-      </div> */}
+      </div>
     </div>
   );
 }
@@ -478,11 +539,6 @@ export default function App() {
   const [editingScheduleCh, setEditingScheduleCh] = useState(null);
   const editingScheduleChRef = useRef(null);
 
-  const [cutoffs, setCutoffs] = useState({
-    1: { enabled: false, thresholdW: 150, holdSec: 10 },
-    3: { enabled: false, thresholdW: 150, holdSec: 10 },
-  });
-
   // timer minutes input (UI-only)
   const [timerByCh, setTimerByCh] = useState({
     1: { onFor: { min: 10, sec: 0 }, offFor: { min: 10, sec: 0 } },
@@ -491,6 +547,25 @@ export default function App() {
 
   // countdown tick
   const [tick, setTick] = useState(0);
+
+  // cutoffstates
+  const [cutoffsServer, setCutoffsServer] = useState({
+    1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+    3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+  });
+
+  const [cutoffsDraft, setCutoffsDraft] = useState({
+    1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+    3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+  });
+
+  const [cutoffSavedAt, setCutoffSavedAt] = useState({ 1: null, 3: null });
+  const [editingCutoffCh, setEditingCutoffCh] = useState(null);
+  const editingCutoffChRef = useRef(null);
+
+  useEffect(() => {
+    editingCutoffChRef.current = editingCutoffCh;
+  }, [editingCutoffCh]);
 
   const colors = {
     load1: "#60a5fa",
@@ -561,7 +636,23 @@ export default function App() {
           });
         }
       }
-      if (d.cutoffs) setCutoffs(d.cutoffs);
+      if (d.cutoffs) {
+        setCutoffsServer(d.cutoffs);
+
+        const editingCh = editingCutoffChRef.current;
+
+        if (!editingCh) {
+          setCutoffsDraft(d.cutoffs);
+        } else {
+          setCutoffsDraft((prev) => {
+            const next = { ...prev };
+            for (const ch of [1, 3]) {
+              if (ch !== editingCh) next[ch] = d.cutoffs[ch] || next[ch];
+            }
+            return next;
+          });
+        }
+      }
     } catch {
       // if endpoint missing or down, show a single clean message
       // (doesn't block telemetry)
@@ -710,16 +801,21 @@ export default function App() {
     try {
       setLoadingRelay(true);
       setError("");
-      const c = cutoffs[ch];
+
+      const c = cutoffsDraft[ch]; // ✅ use what user edited
+
       await axios.post(`${API_BASE}/api/cutoff/${DEVICE_ID}`, {
         ch,
         enabled: !!c.enabled,
-        thresholdW: Number(c.thresholdW ?? 150),
-        holdSec: Number(c.holdSec ?? 10),
+        limitmWh: Number(c.limitmWh ?? 1000),
       });
-      await fetchAutomations();
+
+      setCutoffSavedAt((prev) => ({ ...prev, [ch]: Date.now() }));
+      setEditingCutoffCh(null);
+
+      await fetchAutomations(); // refresh from backend
     } catch {
-      setError("Cutoff save failed. Check backend logs.");
+      setError("Energy cutoff save failed. Check backend logs.");
     } finally {
       setLoadingRelay(false);
     }
@@ -729,6 +825,30 @@ export default function App() {
     editingScheduleChRef.current = editingScheduleCh;
   }, [editingScheduleCh]);
 
+  async function cancelCutoff(ch) {
+    try {
+      setLoadingRelay(true);
+      setError("");
+
+      await axios.delete(`${API_BASE}/api/cutoff/${DEVICE_ID}/${ch}`);
+
+      // refresh from backend
+      setEditingCutoffCh(null);
+      await fetchAutomations();
+
+      // reset local draft immediately (nice UX)
+      setCutoffsDraft((prev) => ({
+        ...prev,
+        [ch]: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+      }));
+
+      setCutoffSavedAt((prev) => ({ ...prev, [ch]: Date.now() }));
+    } catch {
+      setError("Energy cutoff cancel failed. Check backend logs.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
   // initial + periodic fetch
   useEffect(() => {
     fetchLatest();
@@ -747,6 +867,10 @@ export default function App() {
       clearInterval(k);
     };
   }, []);
+
+  useEffect(() => {
+    editingCutoffChRef.current = editingCutoffCh;
+  }, [editingCutoffCh]);
 
   // Relay array is now [relay1State, relay3State]
   const relayArr = latest?.relay || device?.relay || [0, 0];
@@ -1081,15 +1205,19 @@ export default function App() {
             scheduleSavedAt={scheduleSavedAt[1]}
             onApplySchedule={applySchedule}
             onCancelSchedule={cancelSchedule}
-            cutoff={cutoffs[1]}
+            cutoff={cutoffsDraft[1]}
             setCutoff={(fn) =>
-              setCutoffs((c) => ({
+              setCutoffsDraft((c) => ({
                 ...c,
                 1: typeof fn === "function" ? fn(c[1]) : fn,
               }))
             }
+            cutoffServer={cutoffsServer[1]}
+            cutoffSavedAt={cutoffSavedAt[1]}
+            onCutoffFocus={(ch) => setEditingCutoffCh(ch)}
             onApplyCutoff={applyCutoff}
             timerMode={timers?.[1]?.mode || null}
+            onCancelCutoff={cancelCutoff}
           />
 
           <RelayCardBackend
@@ -1121,15 +1249,19 @@ export default function App() {
             scheduleServer={schedulesServer[3]}
             scheduleSavedAt={scheduleSavedAt[3]}
             onCancelSchedule={cancelSchedule}
-            cutoff={cutoffs[3]}
+            cutoff={cutoffsDraft[3]}
             setCutoff={(fn) =>
-              setCutoffs((c) => ({
+              setCutoffsDraft((c) => ({
                 ...c,
                 3: typeof fn === "function" ? fn(c[3]) : fn,
               }))
             }
+            cutoffServer={cutoffsServer[3]}
+            cutoffSavedAt={cutoffSavedAt[3]}
+            onCutoffFocus={(ch) => setEditingCutoffCh(ch)}
             onApplyCutoff={applyCutoff}
             timerMode={timers?.[3]?.mode || null}
+            onCancelCutoff={cancelCutoff}
           />
         </div>
       </div>
