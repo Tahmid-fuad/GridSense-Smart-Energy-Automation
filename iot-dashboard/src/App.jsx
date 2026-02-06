@@ -19,6 +19,56 @@ import {
   Cell,
 } from "recharts";
 
+function numOrNull(x) {
+  return typeof x === "number" && Number.isFinite(x) ? x : null;
+}
+
+function computeActiveTotals(latest, device) {
+  const relayArr = latest?.relay || device?.relay || [0, 0];
+  const r1On = (relayArr?.[0] ?? 0) === 1;
+  const r3On = (relayArr?.[1] ?? 0) === 1;
+
+  const v1 = numOrNull(latest?.v1);
+  const v3 = numOrNull(latest?.v3);
+  const i1 = numOrNull(latest?.i1);
+  const i3 = numOrNull(latest?.i3);
+  const p1 = numOrNull(latest?.p1);
+  const p3 = numOrNull(latest?.p3);
+
+  // Voltage rule:
+  // - both ON => mean(v1,v3)
+  // - only one ON => that relay's voltage
+  // - none ON => fallback to legacy voltage if you want, else null
+  let v = null;
+  if (r1On && r3On) {
+    if (v1 != null && v3 != null) v = (v1 + v3) / 2;
+    else v = numOrNull(latest?.voltage) ?? v1 ?? v3;
+  } else if (r1On) {
+    v = v1 ?? numOrNull(latest?.voltage);
+  } else if (r3On) {
+    v = v3 ?? numOrNull(latest?.voltage);
+  } else {
+    v = numOrNull(latest?.voltage); // or null if you prefer
+  }
+
+  // Current/Power rule:
+  // - sum only ON relays (OFF relays contribute 0)
+  const i = (r1On ? (i1 ?? 0) : 0) + (r3On ? (i3 ?? 0) : 0);
+  const p = (r1On ? (p1 ?? 0) : 0) + (r3On ? (p3 ?? 0) : 0);
+
+  // If both OFF, you may want to show "—" instead of 0:
+  const anyOn = r1On || r3On;
+
+  return {
+    r1On,
+    r3On,
+    anyOn,
+    vTotal: v,
+    iTotal: anyOn ? i : null,
+    pTotal: anyOn ? p : null,
+  };
+}
+
 function Stat({ label, value, hint }) {
   return (
     <div className="stat">
@@ -503,6 +553,293 @@ function RelayCardBackend({
   );
 }
 
+function BellIcon({ size = 34 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.73 21a2 2 0 0 1-3.46 0"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon({ size = 22 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M3 6h18"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 6V4h8v2"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 6l1 16h10l1-16"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v7M14 11v7"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function TripNumberField({ label, value, placeholder, onChange, onUserEdit }) {
+  return (
+    <div className="tripField">
+      <div className="small">{label}</div>
+      <input
+        className="input"
+        type="number"
+        value={value}
+        placeholder={placeholder}
+        onFocus={onUserEdit}
+        onChange={(e) => {
+          onUserEdit?.();
+          onChange(e.target.value);
+        }}
+      />
+    </div>
+  );
+}
+
+function TripSettingsModal({
+  open,
+  onClose,
+  draft,
+  setDraft,
+  onSave,
+  onResetLatch,
+  latched,
+  onUserEdit,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="modalBackdrop" onMouseDown={onClose}>
+      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <div>
+            <div className="modalTitle">Trip Settings</div>
+            <div className="small">
+              Leave a field empty to disable that bound.
+            </div>
+          </div>
+          <button className="btn ghost" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div
+          className={`chip ${latched ? "warn" : "muted"}`}
+          style={{ marginBottom: 12 }}
+        >
+          {latched ? (
+            <>
+              Trip is <b>LATCHED</b> (system already tripped)
+            </>
+          ) : (
+            <>
+              Trip latch: <b>OK</b>
+            </>
+          )}
+        </div>
+
+        <div className="tripGrid">
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Voltage (V)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.vMin}
+                placeholder="e.g. 180"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, vMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.vMax}
+                placeholder="e.g. 250"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, vMax: v }))}
+              />
+            </div>
+          </div>
+
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Current (A)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.iMin}
+                placeholder="e.g. 0.05"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, iMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.iMax}
+                placeholder="e.g. 2.5"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, iMax: v }))}
+              />
+            </div>
+          </div>
+
+          <div className="tripGroup">
+            <div className="tripGroupTitle">Power (W)</div>
+            <div className="tripRow">
+              <TripNumberField
+                label="Min"
+                value={draft.pMin}
+                placeholder="e.g. 5"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, pMin: v }))}
+              />
+              <TripNumberField
+                label="Max"
+                value={draft.pMax}
+                placeholder="e.g. 500"
+                onUserEdit={onUserEdit}
+                onChange={(v) => setDraft((s) => ({ ...s, pMax: v }))}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="modalActions">
+          {latched && (
+            <button className="btn" type="button" onClick={onResetLatch}>
+              Reset Trip
+            </button>
+          )}
+          <button className="btn" type="button" onClick={onSave}>
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TripNotificationsPanel({ open, events, onDeleteEvent, onDeleteAll }) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="notifPanel"
+      role="dialog"
+      aria-label="Trip notifications"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="notifHeader">
+        <div>
+          <div className="notifTitleRow">
+            <div className="notifTitle">Trip Notifications</div>
+
+            <button
+              className="iconBtn danger"
+              type="button"
+              title="Delete all notifications"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => onDeleteAll?.()}
+              disabled={!events?.length}
+            >
+              🗑️
+            </button>
+          </div>
+
+          <div className="small">Recent trip actions and faults</div>
+        </div>
+      </div>
+
+      <div className="notifList">
+        {events?.length ? (
+          events.map((ev) => (
+            <div key={ev._id} className="notifItem">
+              <div className={`notifBadge ${ev.level}`}>
+                {ev.level === "fault"
+                  ? "FAULT"
+                  : ev.level === "success"
+                    ? "SUCCESS"
+                    : "INFO"}
+              </div>
+
+              <div className="notifBody">
+                <div className="notifMsg">{ev.message || "—"}</div>
+                <div className="notifMeta">
+                  <span>
+                    {new Date(ev.createdAt).toLocaleString([], {
+                      hour12: false,
+                    })}
+                  </span>
+                  {ev.fault ? (
+                    <span className="notifFault"> • {ev.fault}</span>
+                  ) : null}
+                </div>
+              </div>
+
+              <button
+                className="iconBtn danger"
+                type="button"
+                title="Delete notification"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDeleteEvent?.(ev._id);
+                }}
+              >
+                🗑️
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="small" style={{ padding: 10 }}>
+            No trip logs yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [latest, setLatest] = useState(null);
   const [device, setDevice] = useState(null);
@@ -511,6 +848,41 @@ export default function App() {
   const [loadingRelay, setLoadingRelay] = useState(false);
   const [error, setError] = useState("");
   const [scheduleSavedAt, setScheduleSavedAt] = useState({ 1: null, 3: null });
+
+  // --- Trip / fault detection ---
+  const [tripBusy, setTripBusy] = useState(false);
+  const [tripOpen, setTripOpen] = useState(false);
+  const tripOpenRef = useRef(false);
+  useEffect(() => {
+    tripOpenRef.current = tripOpen;
+  }, [tripOpen]);
+
+  const [editingTrip, setEditingTrip] = useState(false);
+  const editingTripRef = useRef(false);
+  useEffect(() => {
+    editingTripRef.current = editingTrip;
+  }, [editingTrip]);
+
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const [tripEvents, setTripEvents] = useState([]);
+  const [tripLatched, setTripLatched] = useState(false);
+
+  const [tripServer, setTripServer] = useState(null); // backend truth
+  const [tripDraft, setTripDraft] = useState({
+    vMin: "",
+    vMax: "",
+    iMin: "",
+    iMax: "",
+    pMin: "",
+    pMax: "",
+  });
+
+  useEffect(() => {
+    editingTripRef.current = editingTrip;
+  }, [editingTrip]);
+
+  const notifWrapRef = useRef(null);
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
@@ -802,7 +1174,7 @@ export default function App() {
       setLoadingRelay(true);
       setError("");
 
-      const c = cutoffsDraft[ch]; // ✅ use what user edited
+      const c = cutoffsDraft[ch];
 
       await axios.post(`${API_BASE}/api/cutoff/${DEVICE_ID}`, {
         ch,
@@ -821,9 +1193,123 @@ export default function App() {
     }
   }
 
+  async function fetchTrip() {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/trip/${DEVICE_ID}?limit=200`,
+      );
+      const s = res.data?.settings || null;
+
+      setTripLatched(!!s?.latched);
+      setTripEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+
+      if (!tripOpenRef.current && !editingTripRef.current) {
+        setTripDraft({
+          vMin: s?.vMin ?? "",
+          vMax: s?.vMax ?? "",
+          iMin: s?.iMin ?? "",
+          iMax: s?.iMax ?? "",
+          pMin: s?.pMin ?? "",
+          pMax: s?.pMax ?? "",
+        });
+      }
+
+      return s;
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveTripSettings() {
+    try {
+      setLoadingRelay(true);
+      setError("");
+
+      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/settings`, {
+        vMin: tripDraft.vMin,
+        vMax: tripDraft.vMax,
+        iMin: tripDraft.iMin,
+        iMax: tripDraft.iMax,
+        pMin: tripDraft.pMin,
+        pMax: tripDraft.pMax,
+      });
+
+      await fetchTrip();
+      setTripOpen(false);
+      setEditingTrip(false);
+    } catch (e) {
+      setError(e?.response?.data?.error || "Trip settings save failed.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
+  async function resetTripLatch() {
+    try {
+      setLoadingRelay(true);
+      setError("");
+      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/reset`);
+      await fetchTrip();
+    } catch {
+      setError("Trip reset failed.");
+    } finally {
+      setLoadingRelay(false);
+    }
+  }
+
   useEffect(() => {
     editingScheduleChRef.current = editingScheduleCh;
   }, [editingScheduleCh]);
+
+  async function clearTripEvents() {
+    try {
+      setTripBusy(true);
+      setError("");
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
+      await fetchTrip(); // refresh list
+    } catch (e) {
+      setError(
+        e?.response?.data?.error || "Failed to clear trip notifications.",
+      );
+    } finally {
+      setTripBusy(false);
+    }
+  }
+
+  async function deleteTripEvent(eventId) {
+    if (!eventId) return;
+    try {
+      setTripBusy(true);
+      setError("");
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
+      await fetchTrip(); // refresh list
+    } catch (e) {
+      setError(e?.response?.data?.error || "Failed to delete notification.");
+    } finally {
+      setTripBusy(false);
+    }
+  }
+
+  // async function deleteTripEvent(eventId) {
+  //   if (!eventId) return;
+
+  //   try {
+  //     setError("");
+  //     await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
+  //     await fetchTrip(); // refresh list
+  //   } catch (e) {
+  //     setError(e?.response?.data?.error || "Delete trip event failed.");
+  //   }
+  // }
+
+  async function deleteAllTripEvents() {
+    try {
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
+      await fetchTrip();
+    } catch (e) {
+      setError(e?.response?.data?.error || "Delete all trip events failed.");
+    }
+  }
 
   async function cancelCutoff(ch) {
     try {
@@ -872,6 +1358,37 @@ export default function App() {
     editingCutoffChRef.current = editingCutoffCh;
   }, [editingCutoffCh]);
 
+  useEffect(() => {
+    fetchLatest();
+    fetchHistory();
+    fetchAutomations();
+    fetchTrip();
+
+    const t = setInterval(fetchLatest, 2000);
+    const h = setInterval(fetchHistory, 8000);
+    const a = setInterval(fetchAutomations, 10000);
+    const tr = setInterval(fetchTrip, 12000);
+    const k = setInterval(() => setTick((x) => x + 1), 1000);
+
+    return () => {
+      clearInterval(t);
+      clearInterval(h);
+      clearInterval(a);
+      clearInterval(tr);
+      clearInterval(k);
+    };
+  }, []);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!notifOpen) return;
+      if (!notifWrapRef.current) return;
+      if (!notifWrapRef.current.contains(e.target)) setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [notifOpen]);
+
   // Relay array is now [relay1State, relay3State]
   const relayArr = latest?.relay || device?.relay || [0, 0];
   const relay1 = relayArr?.[0] ?? 0;
@@ -887,28 +1404,16 @@ export default function App() {
   const i3 = typeof latest?.i3 === "number" ? latest.i3 : null;
   const p3 = typeof latest?.p3 === "number" ? latest.p3 : null;
   const e3Wh = typeof latest?.e3Wh === "number" ? latest.e3Wh : null;
+  
+  const totals = useMemo(
+    () => computeActiveTotals(latest, device),
+    [latest, device],
+  );
 
-  const totalVoltage = useMemo(() => {
-    if (typeof latest?.v1 === "number" && typeof latest?.v3 === "number") {
-      return (latest.v1 + latest.v3) / 2;
-    }
-    if (typeof latest?.voltage === "number") return latest.voltage;
-    return typeof latest?.v1 === "number"
-      ? latest.v1
-      : typeof latest?.v3 === "number"
-        ? latest.v3
-        : null;
-  }, [latest]);
+  const totalVoltage = totals.vTotal;
+  const totalCurrent = totals.iTotal;
+  const pT = totals.pTotal;
 
-  const totalCurrent = useMemo(() => {
-    if (typeof latest?.i1 === "number" || typeof latest?.i3 === "number") {
-      return Number(latest?.i1 || 0) + Number(latest?.i3 || 0);
-    }
-    return typeof latest?.current === "number" ? latest.current : null;
-  }, [latest]);
-
-  // totals
-  const pT = typeof latest?.power === "number" ? latest.power : null;
   const eT = typeof latest?.energyWh === "number" ? latest.energyWh : null;
   const rssi = typeof latest?.rssi === "number" ? latest.rssi : null;
 
@@ -1037,9 +1542,52 @@ export default function App() {
           <div className="pill">
             Last seen: <b>{lastSeenText}</b>
           </div>
+
           <button className="btn" onClick={fetchLatest} type="button">
             Refresh
           </button>
+
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              const s = await fetchTrip(); // latest once
+
+              setTripDraft({
+                vMin: s?.vMin ?? "",
+                vMax: s?.vMax ?? "",
+                iMin: s?.iMin ?? "",
+                iMax: s?.iMax ?? "",
+                pMin: s?.pMin ?? "",
+                pMax: s?.pMax ?? "",
+              });
+
+              setEditingTrip(false); // unlock initially
+              setTripOpen(true);
+            }}
+          >
+            Trip Settings
+          </button>
+
+          <div ref={notifWrapRef} className="notifWrap">
+            <button
+              className={`iconBtn ${tripLatched ? "warn" : ""}`}
+              type="button"
+              onClick={() => setNotifOpen((s) => !s)}
+              title="Trip notifications"
+            >
+              <BellIcon size={26} />
+              {tripLatched ? <span className="notifDot" /> : null}
+            </button>
+
+            <TripNotificationsPanel
+              open={notifOpen}
+              events={tripEvents}
+              onDeleteEvent={deleteTripEvent}
+              onDeleteAll={deleteAllTripEvents}
+            />
+          </div>
+
           <button
             className="btn masterOff"
             onClick={masterOff}
@@ -1437,6 +1985,21 @@ export default function App() {
 
       {/* keep tick alive for countdown refresh */}
       <div style={{ display: "none" }}>{tick}</div>
+      <TripSettingsModal
+        open={tripOpen}
+        onClose={() => {
+          setTripOpen(false);
+          setEditingTrip(false);
+        }}
+        draft={tripDraft}
+        setDraft={setTripDraft}
+        onSave={saveTripSettings}
+        onResetLatch={resetTripLatch}
+        latched={tripLatched}
+        onUserEdit={() => setEditingTrip(true)}
+        events={tripEvents}
+        onDeleteEvent={deleteTripEvent}
+      />
     </div>
   );
 }
