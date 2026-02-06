@@ -96,10 +96,18 @@ const CutoffSchema = new mongoose.Schema(
   {
     deviceId: { type: String, index: true },
     ch: { type: Number, enum: [1, 3], index: true },
+
     enabled: { type: Boolean, default: false },
-    thresholdW: { type: Number, default: 150 },
-    holdSec: { type: Number, default: 10 },
-    aboveSince: { type: Number, default: null }, // unix seconds
+
+    // Energy budget threshold (mWh)
+    limitmWh: { type: Number, default: 1000 }, // 1000 mWh = 1 Wh
+
+    // Baseline tracking (Wh from ESP32 counters)
+    startWh: { type: Number, default: null },
+    lastWh: { type: Number, default: null },
+
+    // For UI / debug
+    consumedmWh: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
@@ -197,7 +205,7 @@ function startAutomationEngine() {
       const onMin = minutesFromHHMM(s.on);
       const offMin = minutesFromHHMM(s.off);
       let desired = isWithinWindow(nowDhakaMin, onMin, offMin) ? 1 : 0;
-if (s.invert) desired = desired ? 0 : 1;
+      if (s.invert) desired = desired ? 0 : 1;
 
       // Avoid spamming: only publish if desired differs from lastAppliedState
       if (desired !== (s.lastAppliedState ?? 0)) {
@@ -209,6 +217,24 @@ if (s.invert) desired = desired ? 0 : 1;
       }
     }
   }, 20000);
+}
+
+function normalizeCutoff(c) {
+  return {
+    enabled: !!c?.enabled,
+    thresholdW: Number(c?.thresholdW ?? 150),
+    holdSec: Number(c?.holdSec ?? 10),
+  };
+}
+
+function cutoffsEqual(a, b) {
+  const A = normalizeCutoff(a);
+  const B = normalizeCutoff(b);
+  return (
+    A.enabled === B.enabled &&
+    A.thresholdW === B.thresholdW &&
+    A.holdSec === B.holdSec
+  );
 }
 
 mqttClient.on("message", async (topic, buf) => {
@@ -261,50 +287,70 @@ mqttClient.on("message", async (topic, buf) => {
       );
 
       // --- Power cutoff rules (evaluated on each telemetry packet) ---
+      // --- Energy budget auto-off (evaluated on each telemetry packet) ---
       const rules = await Cutoff.find({
         deviceId: doc.deviceId,
         enabled: true,
       }).lean();
 
+      const EPS = 1e-9;
+
       for (const r of rules) {
         const relayOn = relayStateFromArray(r.ch, doc.relay) === 1;
+
+        // If relay is OFF => reset baseline so next ON starts fresh
         if (!relayOn) {
-          // reset if relay is OFF
+          if (
+            r.startWh != null ||
+            r.lastWh != null ||
+            (r.consumedmWh || 0) !== 0
+          ) {
+            await Cutoff.updateOne(
+              { _id: r._id },
+              { $set: { startWh: null, lastWh: null, consumedmWh: 0 } },
+            );
+          }
+          continue;
+        }
+
+        // Use ESP32 per-channel cumulative energy (Wh)
+        const eWh = r.ch === 1 ? doc.e1Wh : doc.e3Wh;
+        if (typeof eWh !== "number") continue;
+
+        const limitmWh = Number(r.limitmWh ?? 0);
+        if (!Number.isFinite(limitmWh) || limitmWh <= 0) continue;
+
+        // First packet after turning ON (or after energy counter reset)
+        if (r.startWh == null || r.lastWh == null || eWh + EPS < r.lastWh) {
           await Cutoff.updateOne(
             { _id: r._id },
-            { $set: { aboveSince: null } },
+            { $set: { startWh: eWh, lastWh: eWh, consumedmWh: 0 } },
           );
           continue;
         }
 
-        const p = r.ch === 1 ? doc.p1 : doc.p3;
-        if (typeof p !== "number") continue;
+        // Compute consumed energy since baseline
+        const consumedmWh = Math.max(0, (eWh - r.startWh) * 1000.0);
 
-        if (p > r.thresholdW) {
-          const aboveSince = r.aboveSince ?? now;
-          const dt = now - aboveSince;
+        // Update tracking for UI/debug
+        await Cutoff.updateOne(
+          { _id: r._id },
+          { $set: { lastWh: eWh, consumedmWh } },
+        );
 
-          if (!r.aboveSince) {
-            await Cutoff.updateOne({ _id: r._id }, { $set: { aboveSince } });
-          } else if (dt >= r.holdSec) {
-            publishRelayCmd(doc.deviceId, r.ch, 0, {
-              reason: "cutoff",
-              p,
-              thresholdW: r.thresholdW,
-            });
-            await Cutoff.updateOne(
-              { _id: r._id },
-              { $set: { aboveSince: null } },
-            );
-          }
-        } else {
-          // back below threshold => reset
-          if (r.aboveSince) {
-            await Cutoff.updateOne(
-              { _id: r._id },
-              { $set: { aboveSince: null } },
-            );
-          }
+        // Trigger auto-OFF when budget reached
+        if (consumedmWh >= limitmWh) {
+          publishRelayCmd(doc.deviceId, r.ch, 0, {
+            reason: "energy_budget",
+            consumedmWh: Number(consumedmWh.toFixed(2)),
+            limitmWh,
+          });
+
+          // Reset baseline so it won't instantly re-trigger
+          await Cutoff.updateOne(
+            { _id: r._id },
+            { $set: { startWh: null, lastWh: null, consumedmWh: 0 } },
+          );
         }
       }
 
@@ -363,7 +409,7 @@ app.post("/api/relay/:deviceId", async (req, res) => {
   // Cancel any active timer for this channel (manual override)
   const cancelRes = await Timer.updateMany(
     { deviceId, ch, active: true },
-    { $set: { active: false } }
+    { $set: { active: false } },
   );
 
   // Use publishRelayCmd so Device.relay[] is updated consistently
@@ -377,7 +423,6 @@ app.post("/api/relay/:deviceId", async (req, res) => {
   });
 });
 
-
 // Master OFF: POST { "state": 0 } (or 1 if you want master ON too)
 app.post("/api/relayAll/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
@@ -390,7 +435,7 @@ app.post("/api/relayAll/:deviceId", async (req, res) => {
   // Cancel all active timers for this device
   await Timer.updateMany(
     { deviceId, active: true },
-    { $set: { active: false } }
+    { $set: { active: false } },
   );
 
   publishRelayCmd(deviceId, 1, state, { reason: "master" });
@@ -471,22 +516,28 @@ app.delete("/api/timer/:deviceId/:ch", async (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/cutoff/:deviceId  { "ch": 1, "enabled": true, "thresholdW":150, "holdSec":10 }
+// POST /api/cutoff/:deviceId  { "ch": 1, "enabled": true, "limitmWh": 500 }
 app.post("/api/cutoff/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
-  const { ch, enabled, thresholdW, holdSec } = req.body;
+  const { ch, enabled, limitmWh } = req.body;
 
   if (![1, 3].includes(ch))
     return res.status(400).json({ ok: false, error: "ch must be 1/3" });
+
+  const lim = Number(limitmWh ?? 1000);
+  if (!Number.isFinite(lim) || lim < 1)
+    return res.status(400).json({ ok: false, error: "limitmWh must be >= 1" });
 
   const doc = await Cutoff.findOneAndUpdate(
     { deviceId, ch },
     {
       $set: {
         enabled: !!enabled,
-        thresholdW: Number(thresholdW ?? 150),
-        holdSec: Number(holdSec ?? 10),
-        aboveSince: null,
+        limitmWh: lim,
+        // Reset counters whenever rule is updated
+        startWh: null,
+        lastWh: null,
+        consumedmWh: 0,
       },
     },
     { upsert: true, new: true },
@@ -504,19 +555,18 @@ app.post("/api/schedule/:deviceId", async (req, res) => {
     return res.status(400).json({ ok: false, error: "ch must be 1/3" });
   }
 
-const doc = await Schedule.findOneAndUpdate(
-  { deviceId, ch },
-  {
-    $set: {
-      enabled: !!enabled,
-      on: on || "18:00",
-      off: off || "23:00",
-      invert: !!invert,
+  const doc = await Schedule.findOneAndUpdate(
+    { deviceId, ch },
+    {
+      $set: {
+        enabled: !!enabled,
+        on: on || "18:00",
+        off: off || "23:00",
+        invert: !!invert,
+      },
     },
-  },
-  { upsert: true, new: true }
-);
-
+    { upsert: true, new: true },
+  );
 
   res.json({ ok: true, schedule: doc });
 });
@@ -555,16 +605,17 @@ app.get("/api/automations/:deviceId", async (req, res) => {
   }
 
   const cByCh = {
-    1: { enabled: false, thresholdW: 150, holdSec: 10 },
-    3: { enabled: false, thresholdW: 150, holdSec: 10 },
+  1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+  3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+};
+
+for (const c of cutoffs) {
+  cByCh[c.ch] = {
+    enabled: !!c.enabled,
+    limitmWh: Number(c.limitmWh ?? 1000),
+    consumedmWh: Number(c.consumedmWh ?? 0),
   };
-  for (const c of cutoffs) {
-    cByCh[c.ch] = {
-      enabled: !!c.enabled,
-      thresholdW: Number(c.thresholdW ?? 150),
-      holdSec: Number(c.holdSec ?? 10),
-    };
-  }
+}
 
   res.json({ ok: true, timers: tByCh, schedules: sByCh, cutoffs: cByCh });
 });
@@ -580,6 +631,20 @@ app.delete("/api/schedule/:deviceId/:ch", async (req, res) => {
 
   // Delete the schedule document completely
   const result = await Schedule.deleteOne({ deviceId, ch: channel });
+
+  res.json({ ok: true, deletedCount: result.deletedCount || 0 });
+});
+
+// DELETE /api/cutoff/:deviceId/:ch  -> delete cutoff entry
+app.delete("/api/cutoff/:deviceId/:ch", async (req, res) => {
+  const { deviceId, ch } = req.params;
+  const channel = Number(ch);
+
+  if (![1, 3].includes(channel)) {
+    return res.status(400).json({ ok: false, error: "ch must be 1/3" });
+  }
+
+  const result = await Cutoff.deleteOne({ deviceId, ch: channel });
 
   res.json({ ok: true, deletedCount: result.deletedCount || 0 });
 });
