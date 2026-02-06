@@ -531,6 +531,45 @@ function BellIcon({ size = 34 }) {
   );
 }
 
+function TrashIcon({ size = 22 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M3 6h18"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 6V4h8v2"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 6l1 16h10l1-16"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v7M14 11v7"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function TripNumberField({ label, value, placeholder, onChange, onUserEdit }) {
   return (
     <div className="tripField">
@@ -558,7 +597,7 @@ function TripSettingsModal({
   onSave,
   onResetLatch,
   latched,
-  onUserEdit, 
+  onUserEdit,
 }) {
   if (!open) return null;
 
@@ -568,18 +607,27 @@ function TripSettingsModal({
         <div className="modalHeader">
           <div>
             <div className="modalTitle">Trip Settings</div>
-            <div className="small">Leave a field empty to disable that bound.</div>
+            <div className="small">
+              Leave a field empty to disable that bound.
+            </div>
           </div>
           <button className="btn ghost" onClick={onClose} type="button">
             Close
           </button>
         </div>
 
-        <div className={`chip ${latched ? "warn" : "muted"}`} style={{ marginBottom: 12 }}>
+        <div
+          className={`chip ${latched ? "warn" : "muted"}`}
+          style={{ marginBottom: 12 }}
+        >
           {latched ? (
-            <>Trip is <b>LATCHED</b> (system already tripped)</>
+            <>
+              Trip is <b>LATCHED</b> (system already tripped)
+            </>
           ) : (
-            <>Trip latch: <b>OK</b></>
+            <>
+              Trip latch: <b>OK</b>
+            </>
           )}
         </div>
 
@@ -660,41 +708,76 @@ function TripSettingsModal({
   );
 }
 
-function TripNotificationsPanel({ open, anchorRef, events }) {
+function TripNotificationsPanel({ open, events, onDeleteEvent, onDeleteAll }) {
   if (!open) return null;
 
   return (
-    <div className="notifPanel" role="dialog" aria-label="Trip notifications">
+    <div
+      className="notifPanel"
+      role="dialog"
+      aria-label="Trip notifications"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       <div className="notifHeader">
-        <div className="notifTitle">Trip Noti
-          fications</div>
-        <div className="small">Recent trip actions and faults</div>
+        <div>
+          <div className="notifTitleRow">
+            <div className="notifTitle">Trip Notifications</div>
+
+            <button
+              className="iconBtn danger"
+              type="button"
+              title="Delete all notifications"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => onDeleteAll?.()}
+              disabled={!events?.length}
+            >
+              🗑️
+            </button>
+          </div>
+
+          <div className="small">Recent trip actions and faults</div>
+        </div>
       </div>
 
       <div className="notifList">
         {events?.length ? (
-          events.map((e) => (
-            <div key={e._id || e.createdAt} className="notifItem">
-              <div className={`notifBadge ${e.level}`}>
-                {e.level === "fault"
+          events.map((ev) => (
+            <div key={ev._id} className="notifItem">
+              <div className={`notifBadge ${ev.level}`}>
+                {ev.level === "fault"
                   ? "FAULT"
-                  : e.level === "success"
+                  : ev.level === "success"
                     ? "SUCCESS"
                     : "INFO"}
               </div>
+
               <div className="notifBody">
-                <div className="notifMsg">{e.message || "—"}</div>
+                <div className="notifMsg">{ev.message || "—"}</div>
                 <div className="notifMeta">
                   <span>
-                    {new Date(e.createdAt).toLocaleString([], {
+                    {new Date(ev.createdAt).toLocaleString([], {
                       hour12: false,
                     })}
                   </span>
-                  {e.fault ? (
-                    <span className="notifFault"> • {e.fault}</span>
+                  {ev.fault ? (
+                    <span className="notifFault"> • {ev.fault}</span>
                   ) : null}
                 </div>
               </div>
+
+              <button
+                className="iconBtn danger"
+                type="button"
+                title="Delete notification"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDeleteEvent?.(ev._id);
+                }}
+              >
+                🗑️
+              </button>
             </div>
           ))
         ) : (
@@ -717,6 +800,7 @@ export default function App() {
   const [scheduleSavedAt, setScheduleSavedAt] = useState({ 1: null, 3: null });
 
   // --- Trip / fault detection ---
+  const [tripBusy, setTripBusy] = useState(false);
   const [tripOpen, setTripOpen] = useState(false);
   const tripOpenRef = useRef(false);
   useEffect(() => {
@@ -1127,6 +1211,56 @@ export default function App() {
     editingScheduleChRef.current = editingScheduleCh;
   }, [editingScheduleCh]);
 
+  async function clearTripEvents() {
+    try {
+      setTripBusy(true);
+      setError("");
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
+      await fetchTrip(); // refresh list
+    } catch (e) {
+      setError(
+        e?.response?.data?.error || "Failed to clear trip notifications.",
+      );
+    } finally {
+      setTripBusy(false);
+    }
+  }
+
+  async function deleteTripEvent(eventId) {
+    if (!eventId) return;
+    try {
+      setTripBusy(true);
+      setError("");
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
+      await fetchTrip(); // refresh list
+    } catch (e) {
+      setError(e?.response?.data?.error || "Failed to delete notification.");
+    } finally {
+      setTripBusy(false);
+    }
+  }
+
+  // async function deleteTripEvent(eventId) {
+  //   if (!eventId) return;
+
+  //   try {
+  //     setError("");
+  //     await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
+  //     await fetchTrip(); // refresh list
+  //   } catch (e) {
+  //     setError(e?.response?.data?.error || "Delete trip event failed.");
+  //   }
+  // }
+
+  async function deleteAllTripEvents() {
+  try {
+    await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
+    await fetchTrip();
+  } catch (e) {
+    setError(e?.response?.data?.error || "Delete all trip events failed.");
+  }
+}
+
   async function cancelCutoff(ch) {
     try {
       setLoadingRelay(true);
@@ -1408,7 +1542,12 @@ export default function App() {
               {tripLatched ? <span className="notifDot" /> : null}
             </button>
 
-            <TripNotificationsPanel open={notifOpen} events={tripEvents} />
+            <TripNotificationsPanel
+              open={notifOpen}
+              events={tripEvents}
+              onDeleteEvent={deleteTripEvent}
+              onDeleteAll={deleteAllTripEvents}
+            />
           </div>
 
           <button
@@ -1820,6 +1959,8 @@ export default function App() {
         onResetLatch={resetTripLatch}
         latched={tripLatched}
         onUserEdit={() => setEditingTrip(true)}
+        events={tripEvents}
+        onDeleteEvent={deleteTripEvent}
       />
     </div>
   );

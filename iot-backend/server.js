@@ -871,6 +871,54 @@ app.post("/api/trip/:deviceId/reset", async (req, res) => {
   res.json({ ok: true, settings: doc });
 });
 
+// ---------------- Trip Events deletion ----------------
+
+// DELETE all trip events for a device
+app.delete("/api/trip/:deviceId/events", async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+
+    const result = await TripEvent.deleteMany({ deviceId });
+
+    return res.json({
+      ok: true,
+      deletedCount: result.deletedCount || 0,
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to delete trip events.",
+    });
+  }
+});
+
+// DELETE one trip event by id (only if it belongs to the device)
+app.delete("/api/trip/:deviceId/events/:eventId", async (req, res) => {
+  try {
+    const { deviceId, eventId } = req.params;
+
+    // prevent CastError on invalid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ ok: false, error: "Invalid eventId." });
+    }
+
+    const result = await TripEvent.deleteOne({ _id: eventId, deviceId });
+
+    if ((result.deletedCount || 0) === 0) {
+      return res
+        .status(404)
+        .json({ ok: false, error: "Trip event not found." });
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: "Failed to delete trip event.",
+    });
+  }
+});
+
 // ---------- Start ----------
 async function start() {
   await mongoose.connect(MONGO_URI);
