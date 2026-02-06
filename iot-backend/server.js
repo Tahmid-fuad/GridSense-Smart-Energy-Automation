@@ -346,6 +346,11 @@ function checkTripViolations({ v, i, p }, s) {
   return faults;
 }
 
+if (!Array.isArray(doc.relay)) {
+  const dev = await Device.findOne({ deviceId: doc.deviceId }).lean();
+  doc.relay = Array.isArray(dev?.relay) ? dev.relay : [0, 0];
+}
+
 async function evaluateTripOnTelemetry(doc) {
   const deviceId = doc.deviceId;
   const s = await TripSettings.findOne({ deviceId }).lean();
@@ -354,10 +359,15 @@ async function evaluateTripOnTelemetry(doc) {
   // latched => do nothing until user resets
   if (s.latched) return;
 
-  // totals (your ESP sends these already)
-  const v = typeof doc.voltage === "number" ? doc.voltage : null;
-  const i = typeof doc.current === "number" ? doc.current : null;
-  const p = typeof doc.power === "number" ? doc.power : null;
+  // Compute totals using relay-aware rule (same as frontend)
+  const T = computeTripTotalsFromDoc(doc);
+
+  // If both relays are OFF, skip trip evaluation to avoid false trips
+  if (!T.anyOn) return;
+
+  const v = T.v;
+  const i = T.i;
+  const p = T.p;
 
   const faults = checkTripViolations({ v, i, p }, s);
   if (!faults.length) return;
@@ -371,27 +381,71 @@ async function evaluateTripOnTelemetry(doc) {
     { upsert: true },
   );
 
-  await logTripEvent(deviceId, {
-    level: "fault",
-    kind: "trip_triggered",
-    fault: faultTag,
-    message: msg,
-    meta: {
-      v,
-      i,
-      p,
-      settings: {
-        vMin: s.vMin,
-        vMax: s.vMax,
-        iMin: s.iMin,
-        iMax: s.iMax,
-        pMin: s.pMin,
-        pMax: s.pMax,
-      },
+await logTripEvent(deviceId, {
+  level: "fault",
+  kind: "trip_triggered",
+  fault: faultTag,
+  message: msg,
+  meta: {
+    v,
+    i,
+    p,
+    relays: { r1On: T.r1On, r3On: T.r3On },
+    settings: {
+      vMin: s.vMin,
+      vMax: s.vMax,
+      iMin: s.iMin,
+      iMax: s.iMax,
+      pMin: s.pMin,
+      pMax: s.pMax,
     },
-  });
+  },
+});
 
   await tripAllOff(deviceId, { fault: faultTag });
+}
+
+function n(x) {
+  return typeof x === "number" && Number.isFinite(x) ? x : null;
+}
+
+function computeTripTotalsFromDoc(doc) {
+  const r1On = relayStateFromArray(1, doc.relay) === 1;
+  const r3On = relayStateFromArray(3, doc.relay) === 1;
+
+  const v1 = n(doc.v1);
+  const v3 = n(doc.v3);
+  const i1 = n(doc.i1);
+  const i3 = n(doc.i3);
+  const p1 = n(doc.p1);
+  const p3 = n(doc.p3);
+
+  let v = null;
+
+  if (r1On && r3On) {
+    if (v1 != null && v3 != null) v = (v1 + v3) / 2;
+    else v = n(doc.voltage) ?? v1 ?? v3;
+  } else if (r1On) {
+    v = v1 ?? n(doc.voltage);
+  } else if (r3On) {
+    v = v3 ?? n(doc.voltage);
+  } else {
+    v = n(doc.voltage); // or null
+  }
+
+  const anyOn = r1On || r3On;
+
+  const i = (r1On ? (i1 ?? 0) : 0) + (r3On ? (i3 ?? 0) : 0);
+  const p = (r1On ? (p1 ?? 0) : 0) + (r3On ? (p3 ?? 0) : 0);
+
+  return {
+    anyOn,
+    r1On,
+    r3On,
+    v,
+    i: anyOn ? i : null,
+    p: anyOn ? p : null,
+  };
 }
 
 mqttClient.on("message", async (topic, buf) => {

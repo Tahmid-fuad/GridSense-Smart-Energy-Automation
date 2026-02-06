@@ -19,6 +19,56 @@ import {
   Cell,
 } from "recharts";
 
+function numOrNull(x) {
+  return typeof x === "number" && Number.isFinite(x) ? x : null;
+}
+
+function computeActiveTotals(latest, device) {
+  const relayArr = latest?.relay || device?.relay || [0, 0];
+  const r1On = (relayArr?.[0] ?? 0) === 1;
+  const r3On = (relayArr?.[1] ?? 0) === 1;
+
+  const v1 = numOrNull(latest?.v1);
+  const v3 = numOrNull(latest?.v3);
+  const i1 = numOrNull(latest?.i1);
+  const i3 = numOrNull(latest?.i3);
+  const p1 = numOrNull(latest?.p1);
+  const p3 = numOrNull(latest?.p3);
+
+  // Voltage rule:
+  // - both ON => mean(v1,v3)
+  // - only one ON => that relay's voltage
+  // - none ON => fallback to legacy voltage if you want, else null
+  let v = null;
+  if (r1On && r3On) {
+    if (v1 != null && v3 != null) v = (v1 + v3) / 2;
+    else v = numOrNull(latest?.voltage) ?? v1 ?? v3;
+  } else if (r1On) {
+    v = v1 ?? numOrNull(latest?.voltage);
+  } else if (r3On) {
+    v = v3 ?? numOrNull(latest?.voltage);
+  } else {
+    v = numOrNull(latest?.voltage); // or null if you prefer
+  }
+
+  // Current/Power rule:
+  // - sum only ON relays (OFF relays contribute 0)
+  const i = (r1On ? (i1 ?? 0) : 0) + (r3On ? (i3 ?? 0) : 0);
+  const p = (r1On ? (p1 ?? 0) : 0) + (r3On ? (p3 ?? 0) : 0);
+
+  // If both OFF, you may want to show "—" instead of 0:
+  const anyOn = r1On || r3On;
+
+  return {
+    r1On,
+    r3On,
+    anyOn,
+    vTotal: v,
+    iTotal: anyOn ? i : null,
+    pTotal: anyOn ? p : null,
+  };
+}
+
 function Stat({ label, value, hint }) {
   return (
     <div className="stat">
@@ -1253,13 +1303,13 @@ export default function App() {
   // }
 
   async function deleteAllTripEvents() {
-  try {
-    await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
-    await fetchTrip();
-  } catch (e) {
-    setError(e?.response?.data?.error || "Delete all trip events failed.");
+    try {
+      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
+      await fetchTrip();
+    } catch (e) {
+      setError(e?.response?.data?.error || "Delete all trip events failed.");
+    }
   }
-}
 
   async function cancelCutoff(ch) {
     try {
@@ -1354,28 +1404,16 @@ export default function App() {
   const i3 = typeof latest?.i3 === "number" ? latest.i3 : null;
   const p3 = typeof latest?.p3 === "number" ? latest.p3 : null;
   const e3Wh = typeof latest?.e3Wh === "number" ? latest.e3Wh : null;
+  
+  const totals = useMemo(
+    () => computeActiveTotals(latest, device),
+    [latest, device],
+  );
 
-  const totalVoltage = useMemo(() => {
-    if (typeof latest?.v1 === "number" && typeof latest?.v3 === "number") {
-      return (latest.v1 + latest.v3) / 2;
-    }
-    if (typeof latest?.voltage === "number") return latest.voltage;
-    return typeof latest?.v1 === "number"
-      ? latest.v1
-      : typeof latest?.v3 === "number"
-        ? latest.v3
-        : null;
-  }, [latest]);
+  const totalVoltage = totals.vTotal;
+  const totalCurrent = totals.iTotal;
+  const pT = totals.pTotal;
 
-  const totalCurrent = useMemo(() => {
-    if (typeof latest?.i1 === "number" || typeof latest?.i3 === "number") {
-      return Number(latest?.i1 || 0) + Number(latest?.i3 || 0);
-    }
-    return typeof latest?.current === "number" ? latest.current : null;
-  }, [latest]);
-
-  // totals
-  const pT = typeof latest?.power === "number" ? latest.power : null;
   const eT = typeof latest?.energyWh === "number" ? latest.energyWh : null;
   const rssi = typeof latest?.rssi === "number" ? latest.rssi : null;
 

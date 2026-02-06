@@ -540,7 +540,7 @@ body {
 }
 
 /* Mobile: wrap into 2 lines */
-@media (max-width: 720px) {
+@media (max-width: 810px) {
   .overviewLine {
     flex-wrap: wrap;
   }
@@ -613,7 +613,7 @@ body {
 }
 
 /* Mobile: slightly smaller */
-@media (max-width: 720px){
+@media (max-width: 810px){
   .iconBtn{
     width: 92px;
     height: 74px;
@@ -720,7 +720,7 @@ body {
 }
 
 .modal{
-  width: min(720px, 100%);
+  width: min(810px, 100%);
   border-radius: 18px;
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(10, 16, 30, 0.95);
