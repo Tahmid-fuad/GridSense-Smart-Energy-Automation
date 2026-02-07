@@ -1532,7 +1532,7 @@ export default function App() {
     <div className="container">
       <div className="header">
         <div>
-          <h1 className="title">Smart Energy Dashboard</h1>
+          <h1 className="title">GridSense: Smart Energy Automation</h1>
           <div className="subtitle">
             Device <b>{DEVICE_ID}</b> via backend <b>{API_BASE}</b>
           </div>
