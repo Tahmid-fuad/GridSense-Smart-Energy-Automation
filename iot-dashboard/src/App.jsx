@@ -620,9 +620,9 @@ function TrashIcon({ size = 22 }) {
   );
 }
 
-function TripNumberField({ label, value, placeholder, onChange, onUserEdit }) {
+function FaultNumberField({ label, value, placeholder, onChange, onUserEdit }) {
   return (
-    <div className="tripField">
+    <div className="faultField">
       <div className="small">{label}</div>
       <input
         className="input"
@@ -639,7 +639,7 @@ function TripNumberField({ label, value, placeholder, onChange, onUserEdit }) {
   );
 }
 
-function TripSettingsModal({
+function FaultSettingsModal({
   open,
   onClose,
   draft,
@@ -656,7 +656,7 @@ function TripSettingsModal({
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modalHeader">
           <div>
-            <div className="modalTitle">Trip Settings</div>
+            <div className="modalTitle">Fault Settings</div>
             <div className="small">
               Leave a field empty to disable that bound.
             </div>
@@ -676,23 +676,23 @@ function TripSettingsModal({
             </>
           ) : (
             <>
-              Trip latch: <b>OK</b>
+              Fault latch: <b>OK</b>
             </>
           )}
         </div>
 
-        <div className="tripGrid">
-          <div className="tripGroup">
-            <div className="tripGroupTitle">Voltage (V)</div>
-            <div className="tripRow">
-              <TripNumberField
+        <div className="faultGrid">
+          <div className="faultGroup">
+            <div className="faultGroupTitle">Voltage (V)</div>
+            <div className="faultRow">
+              <FaultNumberField
                 label="Min"
                 value={draft.vMin}
                 placeholder="e.g. 180"
                 onUserEdit={onUserEdit}
                 onChange={(v) => setDraft((s) => ({ ...s, vMin: v }))}
               />
-              <TripNumberField
+              <FaultNumberField
                 label="Max"
                 value={draft.vMax}
                 placeholder="e.g. 250"
@@ -702,17 +702,17 @@ function TripSettingsModal({
             </div>
           </div>
 
-          <div className="tripGroup">
-            <div className="tripGroupTitle">Current (A)</div>
-            <div className="tripRow">
-              <TripNumberField
+          <div className="faultGroup">
+            <div className="faultGroupTitle">Current (A)</div>
+            <div className="faultRow">
+              <FaultNumberField
                 label="Min"
                 value={draft.iMin}
                 placeholder="e.g. 0.05"
                 onUserEdit={onUserEdit}
                 onChange={(v) => setDraft((s) => ({ ...s, iMin: v }))}
               />
-              <TripNumberField
+              <FaultNumberField
                 label="Max"
                 value={draft.iMax}
                 placeholder="e.g. 2.5"
@@ -722,17 +722,17 @@ function TripSettingsModal({
             </div>
           </div>
 
-          <div className="tripGroup">
-            <div className="tripGroupTitle">Power (W)</div>
-            <div className="tripRow">
-              <TripNumberField
+          <div className="faultGroup">
+            <div className="faultGroupTitle">Power (W)</div>
+            <div className="faultRow">
+              <FaultNumberField
                 label="Min"
                 value={draft.pMin}
                 placeholder="e.g. 5"
                 onUserEdit={onUserEdit}
                 onChange={(v) => setDraft((s) => ({ ...s, pMin: v }))}
               />
-              <TripNumberField
+              <FaultNumberField
                 label="Max"
                 value={draft.pMax}
                 placeholder="e.g. 500"
@@ -746,7 +746,7 @@ function TripSettingsModal({
         <div className="modalActions">
           {latched && (
             <button className="btn" type="button" onClick={onResetLatch}>
-              Reset Trip
+              Reset Fault
             </button>
           )}
           <button className="btn" type="button" onClick={onSave}>
@@ -758,83 +758,89 @@ function TripSettingsModal({
   );
 }
 
-function TripNotificationsPanel({ open, events, onDeleteEvent, onDeleteAll }) {
+function FaultNotificationsPanel({
+  open,
+  onClose,
+  events,
+  onDeleteEvent,
+  onDeleteAll,
+}) {
   if (!open) return null;
 
   return (
     <div
-      className="notifPanel"
-      role="dialog"
-      aria-label="Trip notifications"
-      onMouseDown={(e) => e.stopPropagation()}
+      className="notifBackdrop"
+      role="presentation"
+      onMouseDown={onClose} // click outside closes
     >
-      <div className="notifHeader">
-        <div>
-          <div className="notifTitleRow">
-            <div className="notifTitle">Trip Notifications</div>
-
-            <button
-              className="iconBtn danger"
-              type="button"
-              title="Delete all notifications"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => onDeleteAll?.()}
-              disabled={!events?.length}
-            >
-              🗑️
-            </button>
-          </div>
-
-          <div className="small">Recent trip actions and faults</div>
-        </div>
-      </div>
-
-      <div className="notifList">
-        {events?.length ? (
-          events.map((ev) => (
-            <div key={ev._id} className="notifItem">
-              <div className={`notifBadge ${ev.level}`}>
-                {ev.level === "fault"
-                  ? "FAULT"
-                  : ev.level === "success"
-                    ? "SUCCESS"
-                    : "INFO"}
-              </div>
-
-              <div className="notifBody">
-                <div className="notifMsg">{ev.message || "—"}</div>
-                <div className="notifMeta">
-                  <span>
-                    {new Date(ev.createdAt).toLocaleString([], {
-                      hour12: false,
-                    })}
-                  </span>
-                  {ev.fault ? (
-                    <span className="notifFault"> • {ev.fault}</span>
-                  ) : null}
-                </div>
-              </div>
+      <div
+        className="notifPanel"
+        role="dialog"
+        aria-label="Fault notifications"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="notifHeader">
+          <div>
+            <div className="notifTitleRow">
+              <div className="notifTitle">Fault Notifications</div>
 
               <button
                 className="iconBtn danger"
                 type="button"
-                title="Delete notification"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onDeleteEvent?.(ev._id);
-                }}
+                title="Delete all notifications"
+                onClick={() => onDeleteAll?.()}
+                disabled={!events?.length}
               >
                 🗑️
               </button>
             </div>
-          ))
-        ) : (
-          <div className="small" style={{ padding: 10 }}>
-            No trip logs yet.
+
+            <div className="small">Recent fault actions and faults</div>
           </div>
-        )}
+        </div>
+
+        <div className="notifList">
+          {events?.length ? (
+            events.map((ev) => (
+              <div key={ev._id} className="notifItem">
+                <div className={`notifBadge ${ev.level}`}>
+                  {ev.level === "fault"
+                    ? "FAULT"
+                    : ev.level === "success"
+                      ? "SUCCESS"
+                      : "INFO"}
+                </div>
+
+                <div className="notifBody">
+                  <div className="notifMsg">{ev.message || "—"}</div>
+                  <div className="notifMeta">
+                    <span>
+                      {new Date(ev.createdAt).toLocaleString([], {
+                        hour12: false,
+                      })}
+                    </span>
+                    {ev.fault ? (
+                      <span className="notifFault"> • {ev.fault}</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <button
+                  className="iconBtn danger"
+                  type="button"
+                  title="Delete notification"
+                  onClick={() => onDeleteEvent?.(ev._id)}
+                >
+                  🗑️
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="small" style={{ padding: 10 }}>
+              No fault logs yet.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -849,27 +855,27 @@ export default function App() {
   const [error, setError] = useState("");
   const [scheduleSavedAt, setScheduleSavedAt] = useState({ 1: null, 3: null });
 
-  // --- Trip / fault detection ---
-  const [tripBusy, setTripBusy] = useState(false);
-  const [tripOpen, setTripOpen] = useState(false);
-  const tripOpenRef = useRef(false);
+  // --- Fault detection ---
+  const [faultBusy, setFaultBusy] = useState(false);
+  const [faultOpen, setFaultOpen] = useState(false);
+  const faultOpenRef = useRef(false);
   useEffect(() => {
-    tripOpenRef.current = tripOpen;
-  }, [tripOpen]);
+    faultOpenRef.current = faultOpen;
+  }, [faultOpen]);
 
-  const [editingTrip, setEditingTrip] = useState(false);
-  const editingTripRef = useRef(false);
+  const [editingFault, setEditingFault] = useState(false);
+  const editingFaultRef = useRef(false);
   useEffect(() => {
-    editingTripRef.current = editingTrip;
-  }, [editingTrip]);
+    editingFaultRef.current = editingFault;
+  }, [editingFault]);
 
   const [notifOpen, setNotifOpen] = useState(false);
 
-  const [tripEvents, setTripEvents] = useState([]);
-  const [tripLatched, setTripLatched] = useState(false);
+  const [faultEvents, setFaultEvents] = useState([]);
+  const [faultLatched, setFaultLatched] = useState(false);
 
-  const [tripServer, setTripServer] = useState(null); // backend truth
-  const [tripDraft, setTripDraft] = useState({
+  const [faultServer, setFaultServer] = useState(null); // backend truth
+  const [faultDraft, setFaultDraft] = useState({
     vMin: "",
     vMax: "",
     iMin: "",
@@ -879,10 +885,8 @@ export default function App() {
   });
 
   useEffect(() => {
-    editingTripRef.current = editingTrip;
-  }, [editingTrip]);
-
-  const notifWrapRef = useRef(null);
+    editingFaultRef.current = editingFault;
+  }, [editingFault]);
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
@@ -1193,18 +1197,18 @@ export default function App() {
     }
   }
 
-  async function fetchTrip() {
+  async function fetchFault() {
     try {
       const res = await axios.get(
-        `${API_BASE}/api/trip/${DEVICE_ID}?limit=200`,
+        `${API_BASE}/api/fault/${DEVICE_ID}?limit=200`,
       );
       const s = res.data?.settings || null;
 
-      setTripLatched(!!s?.latched);
-      setTripEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+      setFaultLatched(!!s?.latched);
+      setFaultEvents(Array.isArray(res.data?.events) ? res.data.events : []);
 
-      if (!tripOpenRef.current && !editingTripRef.current) {
-        setTripDraft({
+      if (!faultOpenRef.current && !editingFaultRef.current) {
+        setFaultDraft({
           vMin: s?.vMin ?? "",
           vMax: s?.vMax ?? "",
           iMin: s?.iMin ?? "",
@@ -1220,38 +1224,38 @@ export default function App() {
     }
   }
 
-  async function saveTripSettings() {
+  async function saveFaultSettings() {
     try {
       setLoadingRelay(true);
       setError("");
 
-      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/settings`, {
-        vMin: tripDraft.vMin,
-        vMax: tripDraft.vMax,
-        iMin: tripDraft.iMin,
-        iMax: tripDraft.iMax,
-        pMin: tripDraft.pMin,
-        pMax: tripDraft.pMax,
+      await axios.post(`${API_BASE}/api/fault/${DEVICE_ID}/settings`, {
+        vMin: faultDraft.vMin,
+        vMax: faultDraft.vMax,
+        iMin: faultDraft.iMin,
+        iMax: faultDraft.iMax,
+        pMin: faultDraft.pMin,
+        pMax: faultDraft.pMax,
       });
 
-      await fetchTrip();
-      setTripOpen(false);
-      setEditingTrip(false);
+      await fetchFault();
+      setFaultOpen(false);
+      setEditingFault(false);
     } catch (e) {
-      setError(e?.response?.data?.error || "Trip settings save failed.");
+      setError(e?.response?.data?.error || "Fault settings save failed.");
     } finally {
       setLoadingRelay(false);
     }
   }
 
-  async function resetTripLatch() {
+  async function resetFaultLatch() {
     try {
       setLoadingRelay(true);
       setError("");
-      await axios.post(`${API_BASE}/api/trip/${DEVICE_ID}/reset`);
-      await fetchTrip();
+      await axios.post(`${API_BASE}/api/fault/${DEVICE_ID}/reset`);
+      await fetchFault();
     } catch {
-      setError("Trip reset failed.");
+      setError("Fault reset failed.");
     } finally {
       setLoadingRelay(false);
     }
@@ -1261,53 +1265,55 @@ export default function App() {
     editingScheduleChRef.current = editingScheduleCh;
   }, [editingScheduleCh]);
 
-  async function clearTripEvents() {
+  async function clearFaultEvents() {
     try {
-      setTripBusy(true);
+      setFaultBusy(true);
       setError("");
-      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
-      await fetchTrip(); // refresh list
+      await axios.delete(`${API_BASE}/api/fault/${DEVICE_ID}/events`);
+      await fetchFault(); // refresh list
     } catch (e) {
       setError(
-        e?.response?.data?.error || "Failed to clear trip notifications.",
+        e?.response?.data?.error || "Failed to clear fault notifications.",
       );
     } finally {
-      setTripBusy(false);
+      setFaultBusy(false);
     }
   }
 
-  async function deleteTripEvent(eventId) {
+  async function deleteFaultEvent(eventId) {
     if (!eventId) return;
     try {
-      setTripBusy(true);
+      setFaultBusy(true);
       setError("");
-      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
-      await fetchTrip(); // refresh list
+      await axios.delete(
+        `${API_BASE}/api/fault/${DEVICE_ID}/events/${eventId}`,
+      );
+      await fetchFault(); // refresh list
     } catch (e) {
       setError(e?.response?.data?.error || "Failed to delete notification.");
     } finally {
-      setTripBusy(false);
+      setFaultBusy(false);
     }
   }
 
-  // async function deleteTripEvent(eventId) {
+  // async function deleteFaultEvent(eventId) {
   //   if (!eventId) return;
 
   //   try {
   //     setError("");
-  //     await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events/${eventId}`);
-  //     await fetchTrip(); // refresh list
+  //     await axios.delete(`${API_BASE}/api/fault/${DEVICE_ID}/events/${eventId}`);
+  //     await fetchFault(); // refresh list
   //   } catch (e) {
-  //     setError(e?.response?.data?.error || "Delete trip event failed.");
+  //     setError(e?.response?.data?.error || "Delete fault event failed.");
   //   }
   // }
 
-  async function deleteAllTripEvents() {
+  async function deleteAllFaultEvents() {
     try {
-      await axios.delete(`${API_BASE}/api/trip/${DEVICE_ID}/events`);
-      await fetchTrip();
+      await axios.delete(`${API_BASE}/api/fault/${DEVICE_ID}/events`);
+      await fetchFault();
     } catch (e) {
-      setError(e?.response?.data?.error || "Delete all trip events failed.");
+      setError(e?.response?.data?.error || "Delete all fault events failed.");
     }
   }
 
@@ -1362,12 +1368,12 @@ export default function App() {
     fetchLatest();
     fetchHistory();
     fetchAutomations();
-    fetchTrip();
+    fetchFault();
 
     const t = setInterval(fetchLatest, 2000);
     const h = setInterval(fetchHistory, 8000);
     const a = setInterval(fetchAutomations, 10000);
-    const tr = setInterval(fetchTrip, 12000);
+    const tr = setInterval(fetchFault, 12000);
     const k = setInterval(() => setTick((x) => x + 1), 1000);
 
     return () => {
@@ -1382,10 +1388,7 @@ export default function App() {
   useEffect(() => {
     function onDocClick(e) {
       if (!notifOpen) return;
-      if (!notifWrapRef.current) return;
-      if (!notifWrapRef.current.contains(e.target)) setNotifOpen(false);
     }
-    document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [notifOpen]);
 
@@ -1404,7 +1407,7 @@ export default function App() {
   const i3 = typeof latest?.i3 === "number" ? latest.i3 : null;
   const p3 = typeof latest?.p3 === "number" ? latest.p3 : null;
   const e3Wh = typeof latest?.e3Wh === "number" ? latest.e3Wh : null;
-  
+
   const totals = useMemo(
     () => computeActiveTotals(latest, device),
     [latest, device],
@@ -1551,9 +1554,9 @@ export default function App() {
             className="btn"
             type="button"
             onClick={async () => {
-              const s = await fetchTrip(); // latest once
+              const s = await fetchFault(); 
 
-              setTripDraft({
+              setFaultDraft({
                 vMin: s?.vMin ?? "",
                 vMax: s?.vMax ?? "",
                 iMin: s?.iMin ?? "",
@@ -1562,29 +1565,30 @@ export default function App() {
                 pMax: s?.pMax ?? "",
               });
 
-              setEditingTrip(false); // unlock initially
-              setTripOpen(true);
+              setEditingFault(false);
+              setFaultOpen(true);
             }}
           >
-            Trip Settings
+            Fault Settings
           </button>
 
-          <div ref={notifWrapRef} className="notifWrap">
+          <div className="notifWrap">
             <button
-              className={`iconBtn ${tripLatched ? "warn" : ""}`}
+              className={`iconBtn ${faultLatched ? "warn" : ""}`}
               type="button"
               onClick={() => setNotifOpen((s) => !s)}
-              title="Trip notifications"
+              title="Fault notifications"
             >
               <BellIcon size={26} />
-              {tripLatched ? <span className="notifDot" /> : null}
+              {faultLatched ? <span className="notifDot" /> : null}
             </button>
 
-            <TripNotificationsPanel
+            <FaultNotificationsPanel
               open={notifOpen}
-              events={tripEvents}
-              onDeleteEvent={deleteTripEvent}
-              onDeleteAll={deleteAllTripEvents}
+              onClose={() => setNotifOpen(false)}
+              events={faultEvents}
+              onDeleteEvent={deleteFaultEvent}
+              onDeleteAll={deleteAllFaultEvents}
             />
           </div>
 
@@ -1985,20 +1989,20 @@ export default function App() {
 
       {/* keep tick alive for countdown refresh */}
       <div style={{ display: "none" }}>{tick}</div>
-      <TripSettingsModal
-        open={tripOpen}
+      <FaultSettingsModal
+        open={faultOpen}
         onClose={() => {
-          setTripOpen(false);
-          setEditingTrip(false);
+          setFaultOpen(false);
+          setEditingFault(false);
         }}
-        draft={tripDraft}
-        setDraft={setTripDraft}
-        onSave={saveTripSettings}
-        onResetLatch={resetTripLatch}
-        latched={tripLatched}
-        onUserEdit={() => setEditingTrip(true)}
-        events={tripEvents}
-        onDeleteEvent={deleteTripEvent}
+        draft={faultDraft}
+        setDraft={setFaultDraft}
+        onSave={saveFaultSettings}
+        onResetLatch={resetFaultLatch}
+        latched={faultLatched}
+        onUserEdit={() => setEditingFault(true)}
+        events={faultEvents}
+        onDeleteEvent={deleteFaultEvent}
       />
     </div>
   );
