@@ -205,13 +205,14 @@ function RelayCardBackend({
         {/* ON FOR row */}
         <div className="row">
           <div className="small">Turn OFF after</div>
-
+        </div>
+        <div className="row">
           <input
             className="input"
-            style={{ width: 90 }}
+            style={{ width: 50 }}
             type="number"
             min={0}
-            max={720}
+            max={1440}
             value={timerVal?.onFor?.min ?? 0}
             onChange={(e) =>
               setTimerVal((s) => ({
@@ -221,7 +222,7 @@ function RelayCardBackend({
                 }),
                 onFor: {
                   ...((s && s.onFor) || { min: 0, sec: 0 }),
-                  min: Math.max(0, Math.min(720, Number(e.target.value))),
+                  min: Math.max(0, Math.min(1440, Number(e.target.value))),
                 },
               }))
             }
@@ -231,7 +232,7 @@ function RelayCardBackend({
 
           <input
             className="input"
-            style={{ width: 90 }}
+            style={{ width: 50 }}
             type="number"
             min={0}
             max={59}
@@ -266,13 +267,14 @@ function RelayCardBackend({
         {/* OFF FOR row */}
         <div className="row" style={{ marginTop: 8 }}>
           <div className="small">Turn ON after</div>
-
+        </div>
+        <div className="row">
           <input
             className="input"
-            style={{ width: 90 }}
+            style={{ width: 50 }}
             type="number"
             min={0}
-            max={720}
+            max={1440}
             value={timerVal?.offFor?.min ?? 0}
             onChange={(e) =>
               setTimerVal((s) => ({
@@ -282,7 +284,7 @@ function RelayCardBackend({
                 }),
                 offFor: {
                   ...((s && s.offFor) || { min: 0, sec: 0 }),
-                  min: Math.max(0, Math.min(720, Number(e.target.value))),
+                  min: Math.max(0, Math.min(1440, Number(e.target.value))),
                 },
               }))
             }
@@ -292,7 +294,7 @@ function RelayCardBackend({
 
           <input
             className="input"
-            style={{ width: 90 }}
+            style={{ width: 50 }}
             type="number"
             min={0}
             max={59}
@@ -356,7 +358,7 @@ function RelayCardBackend({
       {/* Schedule */}
       <div className="miniSection">
         <div className="miniTitle">Daily schedule </div>
-        <div className="row">
+        <div className="row tahmid">
           <label className="check">
             <input
               type="checkbox"
@@ -380,21 +382,26 @@ function RelayCardBackend({
             />
             Reverse
           </label>
+        </div>
 
+        <div className="row tahmid">
           <div className="small">{onLabel}</div>
           <input
             className="input"
             type="time"
+            style={{ width: 120 }}
             value={schedule.on}
             onFocus={() => onScheduleFocus(ch)}
             onChange={(e) => setSchedule((s) => ({ ...s, on: e.target.value }))}
             disabled={disabled || !schedule.enabled}
           />
-
+        </div>
+        <div className="row tahmid">
           <div className="small">{offLabel}</div>
           <input
             className="input"
             type="time"
+            style={{ width: 120 }}
             value={schedule.off}
             onFocus={() => onScheduleFocus(ch)}
             onChange={(e) =>
@@ -402,7 +409,8 @@ function RelayCardBackend({
             }
             disabled={disabled || !schedule.enabled}
           />
-
+        </div>
+        <div className="row">
           <button
             className="btn"
             type="button"
@@ -462,7 +470,7 @@ function RelayCardBackend({
       {/* Energy budget auto-off */}
       <div className="miniSection">
         <div className="miniTitle">Energy budget auto-off</div>
-        <div className="row">
+        <div className="row tahmid">
           <label className="check">
             <input
               type="checkbox"
@@ -475,7 +483,8 @@ function RelayCardBackend({
             />
             Enable
           </label>
-
+        </div>
+        <div className="row tahmid">
           <div className="small">Turn OFF after</div>
 
           <input
@@ -496,7 +505,8 @@ function RelayCardBackend({
             disabled={disabled || !cutoff.enabled}
           />
           <div className="small">mWh</div>
-
+</div>
+        <div className="row">
           <div className={`chip ${cutoff.enabled ? "" : "muted"}`}>
             {cutoff.enabled ? (
               <>
@@ -1554,7 +1564,7 @@ export default function App() {
             className="btn"
             type="button"
             onClick={async () => {
-              const s = await fetchFault(); 
+              const s = await fetchFault();
 
               setFaultDraft({
                 vMin: s?.vMin ?? "",
