@@ -590,8 +590,8 @@ body {
 /* Make the icon button visually comparable to other big buttons */
 .iconBtn{
   width: 90px;           /* was 44px */
-  height: 44px;           /* tall like your row */
-  border-radius: 18px;
+  height: 43.2px;           /* tall like your row */
+  border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(255,255,255,0.06);
   color: rgba(255,255,255,0.92);
@@ -613,7 +613,7 @@ body {
 }
 
 /* Mobile: slightly smaller */
-@media (max-width: 810px){
+/* @media (max-width: 810px){
   .iconBtn{
     width: 92px;
     height: 74px;
@@ -622,7 +622,7 @@ body {
     width: 34px;
     height: 34px;
   }
-}
+} */
 
 
 .notifDot{
@@ -636,8 +636,19 @@ body {
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
 }
 
+.notifBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 90px 12px 12px; 
+  background: rgba(0, 0, 0, 0.18);
+}
+
 .notifPanel{
-  position: absolute;
+  position: relative;
   top: 52px;
   right: 0;
   width: min(420px, calc(100vw - 28px));

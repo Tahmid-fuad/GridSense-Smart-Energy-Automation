@@ -758,83 +758,89 @@ function TripSettingsModal({
   );
 }
 
-function TripNotificationsPanel({ open, events, onDeleteEvent, onDeleteAll }) {
+function TripNotificationsPanel({
+  open,
+  onClose,
+  events,
+  onDeleteEvent,
+  onDeleteAll,
+}) {
   if (!open) return null;
 
   return (
     <div
-      className="notifPanel"
-      role="dialog"
-      aria-label="Trip notifications"
-      onMouseDown={(e) => e.stopPropagation()}
+      className="notifBackdrop"
+      role="presentation"
+      onMouseDown={onClose} // click outside closes
     >
-      <div className="notifHeader">
-        <div>
-          <div className="notifTitleRow">
-            <div className="notifTitle">Trip Notifications</div>
-
-            <button
-              className="iconBtn danger"
-              type="button"
-              title="Delete all notifications"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => onDeleteAll?.()}
-              disabled={!events?.length}
-            >
-              🗑️
-            </button>
-          </div>
-
-          <div className="small">Recent trip actions and faults</div>
-        </div>
-      </div>
-
-      <div className="notifList">
-        {events?.length ? (
-          events.map((ev) => (
-            <div key={ev._id} className="notifItem">
-              <div className={`notifBadge ${ev.level}`}>
-                {ev.level === "fault"
-                  ? "FAULT"
-                  : ev.level === "success"
-                    ? "SUCCESS"
-                    : "INFO"}
-              </div>
-
-              <div className="notifBody">
-                <div className="notifMsg">{ev.message || "—"}</div>
-                <div className="notifMeta">
-                  <span>
-                    {new Date(ev.createdAt).toLocaleString([], {
-                      hour12: false,
-                    })}
-                  </span>
-                  {ev.fault ? (
-                    <span className="notifFault"> • {ev.fault}</span>
-                  ) : null}
-                </div>
-              </div>
+      <div
+        className="notifPanel"
+        role="dialog"
+        aria-label="Trip notifications"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="notifHeader">
+          <div>
+            <div className="notifTitleRow">
+              <div className="notifTitle">Trip Notifications</div>
 
               <button
                 className="iconBtn danger"
                 type="button"
-                title="Delete notification"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onDeleteEvent?.(ev._id);
-                }}
+                title="Delete all notifications"
+                onClick={() => onDeleteAll?.()}
+                disabled={!events?.length}
               >
                 🗑️
               </button>
             </div>
-          ))
-        ) : (
-          <div className="small" style={{ padding: 10 }}>
-            No trip logs yet.
+
+            <div className="small">Recent trip actions and faults</div>
           </div>
-        )}
+        </div>
+
+        <div className="notifList">
+          {events?.length ? (
+            events.map((ev) => (
+              <div key={ev._id} className="notifItem">
+                <div className={`notifBadge ${ev.level}`}>
+                  {ev.level === "fault"
+                    ? "FAULT"
+                    : ev.level === "success"
+                      ? "SUCCESS"
+                      : "INFO"}
+                </div>
+
+                <div className="notifBody">
+                  <div className="notifMsg">{ev.message || "—"}</div>
+                  <div className="notifMeta">
+                    <span>
+                      {new Date(ev.createdAt).toLocaleString([], {
+                        hour12: false,
+                      })}
+                    </span>
+                    {ev.fault ? (
+                      <span className="notifFault"> • {ev.fault}</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <button
+                  className="iconBtn danger"
+                  type="button"
+                  title="Delete notification"
+                  onClick={() => onDeleteEvent?.(ev._id)}
+                >
+                  🗑️
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="small" style={{ padding: 10 }}>
+              No trip logs yet.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -882,7 +888,6 @@ export default function App() {
     editingTripRef.current = editingTrip;
   }, [editingTrip]);
 
-  const notifWrapRef = useRef(null);
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
@@ -1382,10 +1387,7 @@ export default function App() {
   useEffect(() => {
     function onDocClick(e) {
       if (!notifOpen) return;
-      if (!notifWrapRef.current) return;
-      if (!notifWrapRef.current.contains(e.target)) setNotifOpen(false);
     }
-    document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [notifOpen]);
 
@@ -1569,7 +1571,7 @@ export default function App() {
             Trip Settings
           </button>
 
-          <div ref={notifWrapRef} className="notifWrap">
+          <div className="notifWrap">
             <button
               className={`iconBtn ${tripLatched ? "warn" : ""}`}
               type="button"
@@ -1582,6 +1584,7 @@ export default function App() {
 
             <TripNotificationsPanel
               open={notifOpen}
+              onClose={() => setNotifOpen(false)}
               events={tripEvents}
               onDeleteEvent={deleteTripEvent}
               onDeleteAll={deleteAllTripEvents}

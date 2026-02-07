@@ -346,13 +346,14 @@ function checkTripViolations({ v, i, p }, s) {
   return faults;
 }
 
-if (!Array.isArray(doc.relay)) {
-  const dev = await Device.findOne({ deviceId: doc.deviceId }).lean();
-  doc.relay = Array.isArray(dev?.relay) ? dev.relay : [0, 0];
-}
-
 async function evaluateTripOnTelemetry(doc) {
   const deviceId = doc.deviceId;
+
+  if (!Array.isArray(doc.relay)) {
+    const dev = await Device.findOne({ deviceId: doc.deviceId }).lean();
+    doc.relay = Array.isArray(dev?.relay) ? dev.relay : [0, 0];
+  }
+
   const s = await TripSettings.findOne({ deviceId }).lean();
   if (!s || !hasAnyThreshold(s)) return;
 
@@ -381,26 +382,26 @@ async function evaluateTripOnTelemetry(doc) {
     { upsert: true },
   );
 
-await logTripEvent(deviceId, {
-  level: "fault",
-  kind: "trip_triggered",
-  fault: faultTag,
-  message: msg,
-  meta: {
-    v,
-    i,
-    p,
-    relays: { r1On: T.r1On, r3On: T.r3On },
-    settings: {
-      vMin: s.vMin,
-      vMax: s.vMax,
-      iMin: s.iMin,
-      iMax: s.iMax,
-      pMin: s.pMin,
-      pMax: s.pMax,
+  await logTripEvent(deviceId, {
+    level: "fault",
+    kind: "trip_triggered",
+    fault: faultTag,
+    message: msg,
+    meta: {
+      v,
+      i,
+      p,
+      relays: { r1On: T.r1On, r3On: T.r3On },
+      settings: {
+        vMin: s.vMin,
+        vMax: s.vMax,
+        iMin: s.iMin,
+        iMax: s.iMax,
+        pMin: s.pMin,
+        pMax: s.pMax,
+      },
     },
-  },
-});
+  });
 
   await tripAllOff(deviceId, { fault: faultTag });
 }
