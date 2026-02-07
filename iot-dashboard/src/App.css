@@ -558,6 +558,9 @@ body {
   gap: 10px;
   flex-wrap: wrap;
 }
+.tahmid {
+  margin-bottom: 8px;
+}
 .input {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.2);
@@ -628,7 +631,7 @@ body {
   flex-wrap: wrap; /* if the row gets tight on mobile */
   gap: 10px; /* spacing between chip and button (and wrap lines) */
   padding: 6px 10px; /* spacing around the whole block */
-  margin-left: 8px; /* optional: separation from previous inputs in same row */
+  margin-left: -8px; /* optional: separation from previous inputs in same row */
 }
 
 /* When it wraps to next line, ensure vertical spacing stays nice */

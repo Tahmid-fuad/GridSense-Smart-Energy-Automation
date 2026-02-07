@@ -654,7 +654,7 @@ app.get("/api/device/:deviceId", async (req, res) => {
 });
 
 // POST /api/timer/:deviceId
-// Body: { ch:1|3, mode:"on_for"|"off_for", minutes:0..720, seconds:0..59 }
+// Body: { ch:1|3, mode:"on_for"|"off_for", minutes:0..1440, seconds:0..59 }
 app.post("/api/timer/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
   const { ch, mode, minutes, seconds } = req.body;
@@ -677,10 +677,10 @@ app.post("/api/timer/:deviceId", async (req, res) => {
   }
 
   const durationSec = m * 60 + s;
-  if (durationSec <= 0 || durationSec > 12 * 60 * 60) {
+  if (durationSec <= 0 || durationSec > 24 * 60 * 60) {
     return res
       .status(400)
-      .json({ ok: false, error: "duration must be 1..43200 seconds" });
+      .json({ ok: false, error: "duration must be 1..86400 seconds" });
   }
 
   // cancel any previous active timer for this ch
