@@ -111,8 +111,8 @@ const CutoffSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
-// ---------- Trip / Fault detection ----------
-const TripSettingsSchema = new mongoose.Schema(
+// ---------- Fault detection ----------
+const FaultSettingsSchema = new mongoose.Schema(
   {
     deviceId: { type: String, unique: true, index: true },
 
@@ -132,7 +132,7 @@ const TripSettingsSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-const TripEventSchema = new mongoose.Schema(
+const FaultEventSchema = new mongoose.Schema(
   {
     deviceId: { type: String, index: true },
 
@@ -143,7 +143,7 @@ const TripEventSchema = new mongoose.Schema(
       default: "info",
     },
 
-    // "settings_saved" | "settings_cleared" | "trip_triggered" | "trip_reset" ...
+    // "settings_saved" | "settings_cleared" | "fault_triggered" | "fault_reset" ...
     kind: { type: String, default: "info" },
 
     // short fault tag (e.g., "V_HIGH", "P_LOW")
@@ -155,12 +155,16 @@ const TripEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-const TripSettings = mongoose.model(
-  "TripSettings",
-  TripSettingsSchema,
-  "trip_settings",
+const FaultSettings = mongoose.model(
+  "FaultSettings",
+  FaultSettingsSchema,
+  "fault_settings",
 );
-const TripEvent = mongoose.model("TripEvent", TripEventSchema, "trip_events");
+const FaultEvent = mongoose.model(
+  "FaultEvent",
+  FaultEventSchema,
+  "fault_events",
+);
 
 const Timer = mongoose.model("Timer", TimerSchema, "timers");
 const Schedule = mongoose.model("Schedule", ScheduleSchema, "schedules");
@@ -293,25 +297,25 @@ function numberOrNull(x) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function logTripEvent(
+async function logFaultEvent(
   deviceId,
   { level = "info", kind = "info", fault = "", message = "", meta = {} },
 ) {
   try {
-    await TripEvent.create({ deviceId, level, kind, fault, message, meta });
+    await FaultEvent.create({ deviceId, level, kind, fault, message, meta });
   } catch (e) {
-    console.error("[DB] TripEvent log error:", e?.message || e);
+    console.error("[DB] FaultEvent log error:", e?.message || e);
   }
 }
 
-async function tripAllOff(deviceId, meta = {}) {
+async function faultAllOff(deviceId, meta = {}) {
   // same behavior intent as master kill: cancel timers + publish OFF
   await Timer.updateMany(
     { deviceId, active: true },
     { $set: { active: false } },
   );
-  publishRelayCmd(deviceId, 1, 0, { reason: "trip", ...meta });
-  publishRelayCmd(deviceId, 3, 0, { reason: "trip", ...meta });
+  publishRelayCmd(deviceId, 1, 0, { reason: "fault", ...meta });
+  publishRelayCmd(deviceId, 3, 0, { reason: "fault", ...meta });
 }
 
 function hasAnyThreshold(s) {
@@ -320,7 +324,7 @@ function hasAnyThreshold(s) {
   );
 }
 
-function checkTripViolations({ v, i, p }, s) {
+function checkFaultViolations({ v, i, p }, s) {
   const faults = [];
   const add = (tag, msg) => faults.push({ tag, msg });
 
@@ -346,7 +350,7 @@ function checkTripViolations({ v, i, p }, s) {
   return faults;
 }
 
-async function evaluateTripOnTelemetry(doc) {
+async function evaluateFaultOnTelemetry(doc) {
   const deviceId = doc.deviceId;
 
   if (!Array.isArray(doc.relay)) {
@@ -354,37 +358,37 @@ async function evaluateTripOnTelemetry(doc) {
     doc.relay = Array.isArray(dev?.relay) ? dev.relay : [0, 0];
   }
 
-  const s = await TripSettings.findOne({ deviceId }).lean();
+  const s = await FaultSettings.findOne({ deviceId }).lean();
   if (!s || !hasAnyThreshold(s)) return;
 
   // latched => do nothing until user resets
   if (s.latched) return;
 
   // Compute totals using relay-aware rule (same as frontend)
-  const T = computeTripTotalsFromDoc(doc);
+  const T = computeFaultTotalsFromDoc(doc);
 
-  // If both relays are OFF, skip trip evaluation to avoid false trips
+  // If both relays are OFF, skip fault evaluation to avoid false faults
   if (!T.anyOn) return;
 
   const v = T.v;
   const i = T.i;
   const p = T.p;
 
-  const faults = checkTripViolations({ v, i, p }, s);
+  const faults = checkFaultViolations({ v, i, p }, s);
   if (!faults.length) return;
 
   const faultTag = faults.map((f) => f.tag).join("|");
   const msg = faults.map((f) => f.msg).join(" • ");
 
-  await TripSettings.updateOne(
+  await FaultSettings.updateOne(
     { deviceId },
     { $set: { latched: true, latchedAt: new Date(), lastFault: msg } },
     { upsert: true },
   );
 
-  await logTripEvent(deviceId, {
+  await logFaultEvent(deviceId, {
     level: "fault",
-    kind: "trip_triggered",
+    kind: "fault_triggered",
     fault: faultTag,
     message: msg,
     meta: {
@@ -403,14 +407,14 @@ async function evaluateTripOnTelemetry(doc) {
     },
   });
 
-  await tripAllOff(deviceId, { fault: faultTag });
+  await faultAllOff(deviceId, { fault: faultTag });
 }
 
 function n(x) {
   return typeof x === "number" && Number.isFinite(x) ? x : null;
 }
 
-function computeTripTotalsFromDoc(doc) {
+function computeFaultTotalsFromDoc(doc) {
   const r1On = relayStateFromArray(1, doc.relay) === 1;
   const r3On = relayStateFromArray(3, doc.relay) === 1;
 
@@ -551,7 +555,7 @@ mqttClient.on("message", async (topic, buf) => {
         }
       }
 
-      await evaluateTripOnTelemetry(doc);
+      await evaluateFaultOnTelemetry(doc);
 
       // Optional: print a short log so you see it's working
       console.log(
@@ -848,22 +852,22 @@ app.delete("/api/cutoff/:deviceId/:ch", async (req, res) => {
   res.json({ ok: true, deletedCount: result.deletedCount || 0 });
 });
 
-// GET trip settings + recent events
-app.get("/api/trip/:deviceId", async (req, res) => {
+// GET fault settings + recent events
+app.get("/api/fault/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
   const limit = Math.min(parseInt(req.query.limit || "100", 10), 500);
 
   const [settings, events] = await Promise.all([
-    TripSettings.findOne({ deviceId }).lean(),
-    TripEvent.find({ deviceId }).sort({ createdAt: -1 }).limit(limit).lean(),
+    FaultSettings.findOne({ deviceId }).lean(),
+    FaultEvent.find({ deviceId }).sort({ createdAt: -1 }).limit(limit).lean(),
   ]);
 
   res.json({ ok: true, settings: settings || null, events: events || [] });
 });
 
-// Save/Update trip thresholds (any field can be empty => null)
+// Save/Update fault thresholds (any field can be empty => null)
 // POST body: { vMin, vMax, iMin, iMax, pMin, pMax }
-app.post("/api/trip/:deviceId/settings", async (req, res) => {
+app.post("/api/fault/:deviceId/settings", async (req, res) => {
   const { deviceId } = req.params;
 
   const next = {
@@ -886,8 +890,8 @@ app.post("/api/trip/:deviceId/settings", async (req, res) => {
       .status(400)
       .json({ ok: false, error: "Min must be < Max (where both are set)." });
 
-  // update + reset latch on settings change (so system can trip again properly)
-  const doc = await TripSettings.findOneAndUpdate(
+  // update + reset latch on settings change (so system can fault again properly)
+  const doc = await FaultSettings.findOneAndUpdate(
     { deviceId },
     { $set: { ...next, latched: false, latchedAt: null, lastFault: "" } },
     { upsert: true, new: true },
@@ -895,45 +899,45 @@ app.post("/api/trip/:deviceId/settings", async (req, res) => {
 
   const kind = hasAnyThreshold(doc) ? "settings_saved" : "settings_cleared";
 
-  await logTripEvent(deviceId, {
+  await logFaultEvent(deviceId, {
     level: "success",
     kind,
     message: hasAnyThreshold(doc)
-      ? "Trip thresholds saved."
-      : "Trip thresholds cleared (all empty).",
+      ? "Fault thresholds saved."
+      : "Fault thresholds cleared (all empty).",
     meta: next,
   });
 
   res.json({ ok: true, settings: doc });
 });
 
-// Reset trip latch (after a trip)
-app.post("/api/trip/:deviceId/reset", async (req, res) => {
+// Reset fault latch (after a fault)
+app.post("/api/fault/:deviceId/reset", async (req, res) => {
   const { deviceId } = req.params;
 
-  const doc = await TripSettings.findOneAndUpdate(
+  const doc = await FaultSettings.findOneAndUpdate(
     { deviceId },
     { $set: { latched: false, latchedAt: null, lastFault: "" } },
     { upsert: true, new: true },
   );
 
-  await logTripEvent(deviceId, {
+  await logFaultEvent(deviceId, {
     level: "success",
-    kind: "trip_reset",
-    message: "Trip latch reset.",
+    kind: "fault_reset",
+    message: "Fault latch reset.",
   });
 
   res.json({ ok: true, settings: doc });
 });
 
-// ---------------- Trip Events deletion ----------------
+// ---------------- Fault Events deletion ----------------
 
-// DELETE all trip events for a device
-app.delete("/api/trip/:deviceId/events", async (req, res) => {
+// DELETE all fault events for a device
+app.delete("/api/fault/:deviceId/events", async (req, res) => {
   try {
     const { deviceId } = req.params;
 
-    const result = await TripEvent.deleteMany({ deviceId });
+    const result = await FaultEvent.deleteMany({ deviceId });
 
     return res.json({
       ok: true,
@@ -942,13 +946,13 @@ app.delete("/api/trip/:deviceId/events", async (req, res) => {
   } catch (e) {
     return res.status(500).json({
       ok: false,
-      error: "Failed to delete trip events.",
+      error: "Failed to delete fault events.",
     });
   }
 });
 
-// DELETE one trip event by id (only if it belongs to the device)
-app.delete("/api/trip/:deviceId/events/:eventId", async (req, res) => {
+// DELETE one fault event by id (only if it belongs to the device)
+app.delete("/api/fault/:deviceId/events/:eventId", async (req, res) => {
   try {
     const { deviceId, eventId } = req.params;
 
@@ -957,19 +961,19 @@ app.delete("/api/trip/:deviceId/events/:eventId", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid eventId." });
     }
 
-    const result = await TripEvent.deleteOne({ _id: eventId, deviceId });
+    const result = await FaultEvent.deleteOne({ _id: eventId, deviceId });
 
     if ((result.deletedCount || 0) === 0) {
       return res
         .status(404)
-        .json({ ok: false, error: "Trip event not found." });
+        .json({ ok: false, error: "Fault event not found." });
     }
 
     return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({
       ok: false,
-      error: "Failed to delete trip event.",
+      error: "Failed to delete fault event.",
     });
   }
 });
