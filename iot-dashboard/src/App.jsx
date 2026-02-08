@@ -209,46 +209,48 @@ function RelayCardBackend({
         <div className="row">
           <input
             className="input"
-            style={{ width: 50 }}
+            style={{ width: 60 }}
             type="number"
             min={0}
             max={1440}
-            value={timerVal?.onFor?.min ?? 0}
-            onChange={(e) =>
+            value={timerVal?.onFor?.min ?? ""}
+            onChange={(e) => {
+              const n = e.target.valueAsNumber;
               setTimerVal((s) => ({
                 ...(s || {
-                  onFor: { min: 0, sec: 0 },
-                  offFor: { min: 0, sec: 0 },
+                  onFor: { min: null, sec: null },
+                  offFor: { min: null, sec: null },
                 }),
                 onFor: {
-                  ...((s && s.onFor) || { min: 0, sec: 0 }),
-                  min: Math.max(0, Math.min(1440, Number(e.target.value))),
+                  ...((s && s.onFor) || { min: null, sec: null }),
+                  min: Number.isNaN(n) ? null : Math.max(0, Math.min(1440, n)),
                 },
-              }))
-            }
+              }));
+            }}
             disabled={disabled}
           />
           <div className="small">min</div>
 
           <input
             className="input"
-            style={{ width: 50 }}
+            style={{ width: 60 }}
             type="number"
             min={0}
             max={59}
-            value={timerVal?.onFor?.sec ?? 0}
-            onChange={(e) =>
+            value={timerVal?.onFor?.sec ?? ""}
+            onChange={(e) => {
+              const n = e.target.valueAsNumber;
               setTimerVal((s) => ({
                 ...(s || {
-                  onFor: { min: 0, sec: 0 },
-                  offFor: { min: 0, sec: 0 },
+                  onFor: { min: null, sec: null },
+                  offFor: { min: null, sec: null },
                 }),
                 onFor: {
-                  ...((s && s.onFor) || { min: 0, sec: 0 }),
-                  sec: Math.max(0, Math.min(59, Number(e.target.value))),
+                  ...((s && s.onFor) || { min: null, sec: null }),
+                  sec: Number.isNaN(n) ? null : Math.max(0, Math.min(59, n)),
                 },
-              }))
-            }
+              }));
+            }}
             disabled={disabled}
           />
           <div className="small">sec</div>
@@ -271,46 +273,48 @@ function RelayCardBackend({
         <div className="row">
           <input
             className="input"
-            style={{ width: 50 }}
+            style={{ width: 60 }}
             type="number"
             min={0}
             max={1440}
-            value={timerVal?.offFor?.min ?? 0}
-            onChange={(e) =>
+            value={timerVal?.offFor?.min ?? ""}
+            onChange={(e) => {
+              const n = e.target.valueAsNumber;
               setTimerVal((s) => ({
                 ...(s || {
-                  onFor: { min: 0, sec: 0 },
-                  offFor: { min: 0, sec: 0 },
+                  onFor: { min: null, sec: null },
+                  offFor: { min: null, sec: null },
                 }),
                 offFor: {
-                  ...((s && s.offFor) || { min: 0, sec: 0 }),
-                  min: Math.max(0, Math.min(1440, Number(e.target.value))),
+                  ...((s && s.offFor) || { min: null, sec: null }),
+                  min: Number.isNaN(n) ? null : Math.max(0, Math.min(1440, n)),
                 },
-              }))
-            }
+              }));
+            }}
             disabled={disabled}
           />
           <div className="small">min</div>
 
           <input
             className="input"
-            style={{ width: 50 }}
+            style={{ width: 60 }}
             type="number"
             min={0}
             max={59}
-            value={timerVal?.offFor?.sec ?? 0}
-            onChange={(e) =>
+            value={timerVal?.offFor?.sec ?? ""} 
+            onChange={(e) => {
+              const n = e.target.valueAsNumber;
               setTimerVal((s) => ({
                 ...(s || {
-                  onFor: { min: 0, sec: 0 },
-                  offFor: { min: 0, sec: 0 },
+                  onFor: { min: null, sec: null },
+                  offFor: { min: null, sec: null },
                 }),
                 offFor: {
-                  ...((s && s.offFor) || { min: 0, sec: 0 }),
-                  sec: Math.max(0, Math.min(59, Number(e.target.value))),
+                  ...((s && s.offFor) || { min: null, sec: null }),
+                  sec: Number.isNaN(n) ? null : Math.max(0, Math.min(59, n)),
                 },
-              }))
-            }
+              }));
+            }}
             disabled={disabled}
           />
           <div className="small">sec</div>
@@ -492,20 +496,25 @@ function RelayCardBackend({
             style={{ width: 80 }}
             type="number"
             min={1}
-            max={500000}
-            value={cutoff.limitmWh ?? 1000}
+            max={5000000}
+            value={cutoff.limitmWh ?? ""}
             onFocus={() => onCutoffFocus?.(ch)}
             onChange={(e) => {
               onCutoffFocus?.(ch);
+
+              const n = e.target.valueAsNumber;
+
               setCutoff((r) => ({
                 ...r,
-                limitmWh: Math.max(1, Math.min(500000, Number(e.target.value))),
+                limitmWh: Number.isNaN(n)
+                  ? null
+                  : Math.max(1, Math.min(5000000, n)),
               }));
             }}
             disabled={disabled || !cutoff.enabled}
           />
           <div className="small">mWh</div>
-</div>
+        </div>
         <div className="row">
           <div className={`chip ${cutoff.enabled ? "" : "muted"}`}>
             {cutoff.enabled ? (
@@ -927,8 +936,8 @@ export default function App() {
 
   // timer minutes input (UI-only)
   const [timerByCh, setTimerByCh] = useState({
-    1: { onFor: { min: 10, sec: 0 }, offFor: { min: 10, sec: 0 } },
-    3: { onFor: { min: 10, sec: 0 }, offFor: { min: 10, sec: 0 } },
+    1: { onFor: { min: null, sec: null }, offFor: { min: null, sec: null } },
+    3: { onFor: { min: null, sec: null }, offFor: { min: null, sec: null } },
   });
 
   // countdown tick
@@ -941,8 +950,8 @@ export default function App() {
   });
 
   const [cutoffsDraft, setCutoffsDraft] = useState({
-    1: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
-    3: { enabled: false, limitmWh: 1000, consumedmWh: 0 },
+    1: { enabled: false, limitmWh: null, consumedmWh: 0 },
+    3: { enabled: false, limitmWh: null, consumedmWh: 0 },
   });
 
   const [cutoffSavedAt, setCutoffSavedAt] = useState({ 1: null, 3: null });
