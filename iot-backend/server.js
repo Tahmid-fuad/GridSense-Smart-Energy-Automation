@@ -18,37 +18,54 @@ const DEVICE_ID = process.env.DEVICE_ID || "esp32_001";
 const TelemetrySchema = new mongoose.Schema(
   {
     deviceId: { type: String, index: true },
-    ts: { type: Number, index: true }, // from ESP32 payload (seconds)
+    ts: { type: Number, index: true },
 
-    // Legacy totals (still sent)
     voltage: Number,
     current: Number,
     power: Number,
     energyWh: Number,
 
-    // New per-relay calibrated values
     v1: Number,
     i1: Number,
     p1: Number,
     e1Wh: Number,
-
     v3: Number,
     i3: Number,
     p3: Number,
     e3Wh: Number,
 
-    // Diagnostics (optional)
+    e1WhTotal: Number,
+    e3WhTotal: Number,
+    energyWhTotal: Number,
+
     clipI1: Number,
     clipI3: Number,
-
     rssi: Number,
-
-    // Now relay array will be [relay1State, relay3State]
     relay: [Number],
-
     raw: Object,
   },
   { timestamps: true },
+);
+
+TelemetrySchema.index({ deviceId: 1, createdAt: 1 });
+
+const EnergyStateSchema = new mongoose.Schema(
+  {
+    deviceId: { type: String, unique: true, index: true },
+
+    e1OffsetWh: { type: Number, default: 0 },
+    e3OffsetWh: { type: Number, default: 0 },
+
+    lastE1Wh: { type: Number, default: null },
+    lastE3Wh: { type: Number, default: null },
+  },
+  { timestamps: true },
+);
+
+const EnergyState = mongoose.model(
+  "EnergyState",
+  EnergyStateSchema,
+  "energy_state",
 );
 
 const DeviceSchema = new mongoose.Schema(
@@ -453,6 +470,59 @@ function computeFaultTotalsFromDoc(doc) {
   };
 }
 
+function isNum(x) {
+  return typeof x === "number" && Number.isFinite(x);
+}
+
+async function applyEnergyTotals(doc) {
+  const deviceId = doc.deviceId;
+  const EPS_WH = 1e-3; // ignore tiny float jitter
+
+  const st = (await EnergyState.findOne({ deviceId }).lean()) || {
+    e1OffsetWh: 0,
+    e3OffsetWh: 0,
+    lastE1Wh: null,
+    lastE3Wh: null,
+  };
+
+  let { e1OffsetWh, e3OffsetWh, lastE1Wh, lastE3Wh } = st;
+
+  const e1 = isNum(doc.e1Wh) ? doc.e1Wh : null;
+  const e3 = isNum(doc.e3Wh) ? doc.e3Wh : null;
+
+  // channel 1
+  if (e1 != null) {
+    if (isNum(lastE1Wh) && e1 + EPS_WH < lastE1Wh) {
+      e1OffsetWh += lastE1Wh;
+    }
+    doc.e1WhTotal = e1OffsetWh + e1;
+    lastE1Wh = e1;
+  } else {
+    doc.e1WhTotal = null;
+  }
+
+  // channel 3
+  if (e3 != null) {
+    if (isNum(lastE3Wh) && e3 + EPS_WH < lastE3Wh) {
+      e3OffsetWh += lastE3Wh;
+    }
+    doc.e3WhTotal = e3OffsetWh + e3;
+    lastE3Wh = e3;
+  } else {
+    doc.e3WhTotal = null;
+  }
+
+  const t1 = isNum(doc.e1WhTotal) ? doc.e1WhTotal : 0;
+  const t3 = isNum(doc.e3WhTotal) ? doc.e3WhTotal : 0;
+  doc.energyWhTotal = t1 + t3;
+
+  await EnergyState.updateOne(
+    { deviceId },
+    { $set: { e1OffsetWh, e3OffsetWh, lastE1Wh, lastE3Wh } },
+    { upsert: true },
+  );
+}
+
 mqttClient.on("message", async (topic, buf) => {
   const text = buf.toString();
   let data;
@@ -495,6 +565,7 @@ mqttClient.on("message", async (topic, buf) => {
         relay: data.relay, // [relay1State, relay3State]
         raw: data,
       };
+      await applyEnergyTotals(doc);
       await Telemetry.create(doc);
       await Device.updateOne(
         { deviceId: doc.deviceId },
@@ -586,14 +657,121 @@ app.get("/api/latest/:deviceId", async (req, res) => {
 
 app.get("/api/history/:deviceId", async (req, res) => {
   const { deviceId } = req.params;
-  const limit = Math.min(parseInt(req.query.limit || "200", 10), 2000);
 
-  const rows = await Telemetry.find({ deviceId })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean();
+  // If from/to not provided, fall back to your old behavior
+  const from = Number(req.query.from);
+  const to = Number(req.query.to);
 
-  res.json(rows.reverse());
+  // Old fallback (kept)
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    const limit = Math.min(parseInt(req.query.limit || "200", 10), 2000);
+    const rows = await Telemetry.find({ deviceId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+    return res.json(rows.reverse());
+  }
+
+  const fromMs = Math.max(0, from);
+  const toMs = Math.max(fromMs, to);
+  const maxPoints = Math.min(
+    Math.max(parseInt(req.query.maxPoints || "1500", 10), 100),
+    5000,
+  );
+
+  const windowSec = Math.max(1, Math.floor((toMs - fromMs) / 1000));
+
+  let bucketSec = parseInt(req.query.bucketSec || "0", 10);
+  if (!Number.isFinite(bucketSec) || bucketSec < 1) {
+    bucketSec = Math.ceil(windowSec / maxPoints);
+  }
+  bucketSec = Math.max(1, bucketSec);
+
+  const bucketMs = bucketSec * 1000;
+
+  const rows = await Telemetry.aggregate([
+    {
+      $match: {
+        deviceId,
+        createdAt: {
+          $gte: new Date(fromMs),
+          $lte: new Date(toMs),
+        },
+      },
+    },
+
+    // ensure $last works deterministically
+    { $sort: { createdAt: 1 } },
+
+    // compute bucket start time (ms)
+    {
+      $addFields: {
+        bucket: {
+          $multiply: [
+            bucketMs,
+            {
+              $floor: {
+                $divide: [{ $toLong: "$createdAt" }, bucketMs],
+              },
+            },
+          ],
+        },
+      },
+    },
+
+    {
+      $group: {
+        _id: "$bucket",
+
+        // x-axis time (ms)
+        t: { $last: "$bucket" },
+
+        // averages are good for line charts
+        v1: { $avg: "$v1" },
+        i1: { $avg: "$i1" },
+        p1: { $avg: "$p1" },
+
+        v3: { $avg: "$v3" },
+        i3: { $avg: "$i3" },
+        p3: { $avg: "$p3" },
+
+        // Energy counters should NOT be averaged.
+        // If you later add backend-corrected totals like e1WhTotal/e3WhTotal,
+        // use those instead.
+        e1Wh: { $last: "$e1Wh" },
+        e3Wh: { $last: "$e3Wh" },
+
+        // Optional: totals
+        voltage: { $avg: "$voltage" },
+        current: { $avg: "$current" },
+        power: { $avg: "$power" },
+        energyWh: { $last: "$energyWh" },
+      },
+    },
+
+    { $sort: { _id: 1 } },
+
+    {
+      $project: {
+        _id: 0,
+        t: 1,
+        v1: 1,
+        i1: 1,
+        p1: 1,
+        e1Wh: 1,
+        v3: 1,
+        i3: 1,
+        p3: 1,
+        e3Wh: 1,
+        voltage: 1,
+        current: 1,
+        power: 1,
+        energyWh: 1,
+      },
+    },
+  ]);
+
+  res.json(rows);
 });
 
 // Relay command: POST { "ch": 1, "state": 1 }

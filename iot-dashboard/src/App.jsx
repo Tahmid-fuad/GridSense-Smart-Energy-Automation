@@ -301,7 +301,7 @@ function RelayCardBackend({
             type="number"
             min={0}
             max={59}
-            value={timerVal?.offFor?.sec ?? ""} 
+            value={timerVal?.offFor?.sec ?? ""}
             onChange={(e) => {
               const n = e.target.valueAsNumber;
               setTimerVal((s) => ({
@@ -909,6 +909,10 @@ export default function App() {
 
   // timeframe and chart mode
   const [timeframeMin, setTimeframeMin] = useState(30);
+  const timeframeMinRef = useRef(timeframeMin);
+  useEffect(() => {
+    timeframeMinRef.current = timeframeMin;
+  }, [timeframeMin]);
   const timeframeOptions = [
     { label: "15 min", value: 15 },
     { label: "30 min", value: 30 },
@@ -995,14 +999,27 @@ export default function App() {
 
   async function fetchHistory() {
     try {
-      const res = await axios.get(
-        `${API_BASE}/api/history/${DEVICE_ID}?limit=2000`,
-      );
+      const tf = timeframeMinRef.current;
+
+      const to = Date.now();
+      const from = to - tf * 60 * 1000;
+
+      const maxPoints = tf <= 60 ? 2500 : 1500;
+      const bucketSec = tf >= 1440 ? 60 : tf >= 360 ? 16 : 2;
+
+      const res = await axios.get(`${API_BASE}/api/history/${DEVICE_ID}`, {
+        params: { from, to, maxPoints, bucketSec },
+      });
+
       setHistory(Array.isArray(res.data) ? res.data : []);
     } catch {
-      // silent
+      // prevents unhandled promise from setInterval
     }
   }
+
+  useEffect(() => {
+    fetchHistory();
+  }, [timeframeMin]);
 
   async function fetchAutomations() {
     try {
@@ -1360,24 +1377,6 @@ export default function App() {
       setLoadingRelay(false);
     }
   }
-  // initial + periodic fetch
-  useEffect(() => {
-    fetchLatest();
-    fetchHistory();
-    fetchAutomations();
-
-    const t = setInterval(fetchLatest, 2000);
-    const h = setInterval(fetchHistory, 8000);
-    const a = setInterval(fetchAutomations, 10000);
-    const k = setInterval(() => setTick((x) => x + 1), 1000);
-
-    return () => {
-      clearInterval(t);
-      clearInterval(h);
-      clearInterval(a);
-      clearInterval(k);
-    };
-  }, []);
 
   useEffect(() => {
     editingCutoffChRef.current = editingCutoffCh;
@@ -1420,12 +1419,22 @@ export default function App() {
   const v1 = typeof latest?.v1 === "number" ? latest.v1 : null;
   const i1 = typeof latest?.i1 === "number" ? latest.i1 : null;
   const p1 = typeof latest?.p1 === "number" ? latest.p1 : null;
-  const e1Wh = typeof latest?.e1Wh === "number" ? latest.e1Wh : null;
+  const e1Wh =
+    typeof latest?.e1WhTotal === "number"
+      ? latest.e1WhTotal
+      : typeof latest?.e1Wh === "number"
+        ? latest.e1Wh
+        : null;
 
   const v3 = typeof latest?.v3 === "number" ? latest.v3 : null;
   const i3 = typeof latest?.i3 === "number" ? latest.i3 : null;
   const p3 = typeof latest?.p3 === "number" ? latest.p3 : null;
-  const e3Wh = typeof latest?.e3Wh === "number" ? latest.e3Wh : null;
+  const e3Wh =
+    typeof latest?.e3WhTotal === "number"
+      ? latest.e3WhTotal
+      : typeof latest?.e3Wh === "number"
+        ? latest.e3Wh
+        : null;
 
   const totals = useMemo(
     () => computeActiveTotals(latest, device),
@@ -1436,7 +1445,12 @@ export default function App() {
   const totalCurrent = totals.iTotal;
   const pT = totals.pTotal;
 
-  const eT = typeof latest?.energyWh === "number" ? latest.energyWh : null;
+  const eT =
+    typeof latest?.energyWhTotal === "number"
+      ? latest.energyWhTotal
+      : typeof latest?.energyWh === "number"
+        ? latest.energyWh
+        : null;
   const rssi = typeof latest?.rssi === "number" ? latest.rssi : null;
 
   const disabled = loadingRelay || !online;
@@ -1452,33 +1466,19 @@ export default function App() {
 
   // time series
   const series = useMemo(() => {
-    const rows = (history || [])
-      .map((row) => {
-        const t = row?.createdAt
-          ? new Date(row.createdAt).getTime()
-          : row?.ts
-            ? row.ts * 1000
-            : null;
+    return (history || []).map((row) => ({
+      t: row.t, // already ms
+      v1: typeof row.v1 === "number" ? row.v1 : null,
+      i1: typeof row.i1 === "number" ? row.i1 : null,
+      p1: typeof row.p1 === "number" ? row.p1 : null,
+      e1Wh: typeof row.e1Wh === "number" ? row.e1Wh : null,
 
-        if (!t) return null;
-        return {
-          t,
-          v1: typeof row?.v1 === "number" ? row.v1 : null,
-          i1: typeof row?.i1 === "number" ? row.i1 : null,
-          p1: typeof row?.p1 === "number" ? row.p1 : null,
-          e1Wh: typeof row?.e1Wh === "number" ? row.e1Wh : null,
-          v3: typeof row?.v3 === "number" ? row.v3 : null,
-          i3: typeof row?.i3 === "number" ? row.i3 : null,
-          p3: typeof row?.p3 === "number" ? row.p3 : null,
-          e3Wh: typeof row?.e3Wh === "number" ? row.e3Wh : null,
-        };
-      })
-      .filter(Boolean);
-
-    if (!rows.length) return [];
-    const cutoff = Date.now() - timeframeMin * 60 * 1000;
-    return rows.filter((pt) => pt.t >= cutoff);
-  }, [history, timeframeMin]);
+      v3: typeof row.v3 === "number" ? row.v3 : null,
+      i3: typeof row.i3 === "number" ? row.i3 : null,
+      p3: typeof row.p3 === "number" ? row.p3 : null,
+      e3Wh: typeof row.e3Wh === "number" ? row.e3Wh : null,
+    }));
+  }, [history]);
 
   const avgBars = useMemo(() => {
     if (!series.length) return [];
@@ -1507,25 +1507,30 @@ export default function App() {
   }, [series, chartMode]);
 
   const energyPie = useMemo(() => {
-    if (!series.length) return [];
-    const first = series[0];
-    const last = series[series.length - 1];
+    if (series.length < 2) return [];
 
-    const e1a =
-      typeof first.e1Wh === "number" && typeof last.e1Wh === "number"
-        ? last.e1Wh - first.e1Wh
-        : 0;
-    const e3a =
-      typeof first.e3Wh === "number" && typeof last.e3Wh === "number"
-        ? last.e3Wh - first.e3Wh
-        : 0;
+    let e1 = 0;
+    let e3 = 0;
 
-    const e1 = e1a >= 0 ? e1a : typeof last.e1Wh === "number" ? last.e1Wh : 0;
-    const e3 = e3a >= 0 ? e3a : typeof last.e3Wh === "number" ? last.e3Wh : 0;
+    for (let i = 1; i < series.length; i++) {
+      const a = series[i - 1];
+      const b = series[i];
+
+      if (typeof a.e1Wh === "number" && typeof b.e1Wh === "number") {
+        const d = b.e1Wh - a.e1Wh;
+        if (d > 0) e1 += d;
+      }
+      if (typeof a.e3Wh === "number" && typeof b.e3Wh === "number") {
+        const d = b.e3Wh - a.e3Wh;
+        if (d > 0) e3 += d;
+      }
+    }
+
+    if (e1 <= 0 && e3 <= 0) return [];
 
     return [
-      { name: "Load-1", value: Math.max(0, e1) },
-      { name: "Load-2", value: Math.max(0, e3) },
+      { name: "Load-1", value: e1 },
+      { name: "Load-2", value: e3 },
     ];
   }, [series]);
 
