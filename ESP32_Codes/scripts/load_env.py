@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 
 def _parse_env_file(path: Path):
     data = {}
@@ -32,16 +33,37 @@ def define_int(key, default="0"):
     val = vars.get(key, default)
     env.Append(CPPDEFINES=[(key, val)])
 
-# Define macros used in code
-define_str("WIFI_SSID", "")
-define_str("WIFI_PASS", "")
+# -------------------------
+# WiFi: multi-credential support
+# -------------------------
+# Choose a maximum slot count ONCE. You can keep this at 10.
+WIFI_SLOTS_MAX = int(vars.get("WIFI_SLOTS_MAX", "10"))
 
-define_str("MQTT_HOST_ONLINE", "broker.emqx.io")
-define_str("MQTT_HOST_OFFLINE", "192.168.31.108")
-define_int("MQTT_PORT", "1883")
+# Define WIFI_SSID1..WIFI_SSIDN and WIFI_PASS1..WIFI_PASSN
+for i in range(1, WIFI_SLOTS_MAX + 1):
+    define_str(f"WIFI_SSID{i}", "")
+    define_str(f"WIFI_PASS{i}", "")
 
-define_str("BACKEND_BASE", "https://ete416-iot-server.onrender.com")
-define_str("BACKEND_HOST", "192.168.31.108")
-define_int("BACKEND_PORT", "5000")
+# Backward compatibility:
+# If your code still expects WIFI_SSID/WIFI_PASS, fill them from slot1 unless explicitly set.
+ssid_legacy = vars.get("WIFI_SSID", "")
+pass_legacy = vars.get("WIFI_PASS", "")
 
-define_str("DEVICE_ID", "esp32_001")
+ssid1 = vars.get("WIFI_SSID1", "")
+pass1 = vars.get("WIFI_PASS1", "")
+
+define_str("WIFI_SSID", ssid_legacy if ssid_legacy else ssid1)
+define_str("WIFI_PASS", pass_legacy if pass_legacy else pass1)
+
+# -------------------------
+# Existing macros (unchanged)
+# -------------------------
+define_str("MQTT_HOST_ONLINE", vars.get("MQTT_HOST_ONLINE", ""))
+define_str("MQTT_HOST_OFFLINE", vars.get("MQTT_HOST_OFFLINE", "192.168.31.108"))
+define_int("MQTT_PORT", vars.get("MQTT_PORT", "1883"))
+
+define_str("BACKEND_BASE", vars.get("BACKEND_BASE", ""))
+define_str("BACKEND_HOST", vars.get("BACKEND_HOST", "192.168.31.108"))
+define_int("BACKEND_PORT", vars.get("BACKEND_PORT", "5000"))
+
+define_str("DEVICE_ID", vars.get("DEVICE_ID", "esp32_001"))
