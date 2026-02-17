@@ -101,8 +101,6 @@
 #define DEVICE_ID "esp32_001"
 #endif
 
-const char *ssid = WIFI_SSID;
-const char *pass = WIFI_PASS;
 const int mqtt_port = MQTT_PORT;
 const char *deviceId = DEVICE_ID;
 
@@ -138,9 +136,9 @@ static const WifiCred WIFI_LIST[] = {
     {WIFI_SSID6, WIFI_PASS6},
 };
 
-static const uint8_t WIFI_FAILS_BEFORE_NEXT = 5;
-static const uint32_t WIFI_JOIN_TIMEOUT_MS = 12000; // per attempt
-static const uint32_t WIFI_RETRY_GAP_MS = 500;      // small gap between attempts
+static const uint8_t WIFI_FAILS_BEFORE_NEXT = 1;
+static const uint32_t WIFI_JOIN_TIMEOUT_MS = 3000; // per attempt
+static const uint32_t WIFI_RETRY_GAP_MS = 500;     // small gap between attempts
 
 static size_t wifiIndex = 0;
 static uint8_t wifiFailCountForThis = 0;
@@ -234,11 +232,13 @@ static bool tickWiFiManager()
   return false;
 }
 
-static const uint8_t MQTT_FAILS_BEFORE_WIFI_DROP = 10;
-static const uint32_t MQTT_RETRY_INTERVAL_MS = 2000;
+static const uint8_t MQTT_FAILS_BEFORE_WIFI_DROP = 3;
+static const uint32_t MQTT_RETRY_INTERVAL_MS = 500;
 
 static uint8_t mqttFailCount = 0;
 static uint32_t lastMqttAttemptMs = 0;
+
+static bool pendingRestoreFromBackend = true;
 
 /* ===================== RELAYS (ONLY 2) ===================== */
 static const int RELAY1_PIN = 23; // Relay-1
@@ -547,6 +547,7 @@ static bool tryConnectMQTTOnce()
     publishStatus("boot_connected");
     publishAck("boot_connected");
     mqttFailCount = 0;
+    pendingRestoreFromBackend = true;
     return true;
   }
 
@@ -617,7 +618,6 @@ void setup()
   Serial.print("ESP32 IP: ");
   Serial.println(WiFi.localIP());
 
-  restoreRelayStateFromBackend();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   client.setBufferSize(1024);
@@ -632,12 +632,23 @@ void loop()
   // 2) If WiFi connected, attempt MQTT (non-blocking)
   if (WiFi.status() == WL_CONNECTED)
   {
-    tryConnectMQTTOnce();
+    bool mqttOk = tryConnectMQTTOnce();
     client.loop();
+
+    if (mqttOk && pendingRestoreFromBackend)
+    {
+      pendingRestoreFromBackend = false;
+
+      restoreRelayStateFromBackend();
+
+      publishStatus("relay_restored");
+      publishAck("relay_restored");
+    }
   }
 
   if (millis() - lastTelemetryMs > 2000)
   {
+    if (!client.connected()) return;
     unsigned long nowMs = millis();
     float dtHours = 0.0f;
     if (lastTelemetryMs != 0)
